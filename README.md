@@ -125,7 +125,7 @@ pip install -r requirements.lock # Or create requirements.txt from pyproject.tom
 
 Once the server is running, the plugin is installed in Studio, and your MCP client is connected, you can interact with your Studio session through the AI.
 
-Address the agent (@-mentioning the tool source if your client requires it, e.g., `@VibeBlocksMCP`) and ask it to perform actions.
+Address the agent (@-mentioning the tools  if your client requires it, e.g., `list_children`) and ask it to perform actions.
 
 **Example Prompts:**
 
