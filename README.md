@@ -129,20 +129,20 @@ Address the agent (@-mentioning the tool source if your client requires it, e.g.
 
 **Example Prompts:**
 
-*   "@VibeBlocksMCP Create a bright red Part named 'Floor' in Workspace. Set its size to (100, 2, 100) and position to (0, -1, 0). Anchor it."
-*   "@VibeBlocksMCP Delete the object named 'Workspace.OldPlatform'"
-*   "@VibeBlocksMCP What is the Position property of 'Workspace.SpawnLocation'?"
-*   "@VibeBlocksMCP List the children of ServerScriptService."
-*   "@VibeBlocksMCP Find all instances with className 'Script' under ServerScriptService."
-*   "@VibeBlocksMCP Execute this script in Studio: `print(game:GetService('Lighting').ClockTime)`"
-*   "@VibeBlocksMCP Set the `ClockTime` property of Lighting to 14."
-*   "@VibeBlocksMCP Clone 'ReplicatedStorage.Templates.EnemyNPC' and name the clone 'Guard1'. Parent it to Workspace."
-*   "@VibeBlocksMCP Make the model named 'Workspace.Guard1' play animation asset 123456789."
-*   "@VibeBlocksMCP Modify all children of 'Workspace.DecorationFolder' with className 'Part' to have their Material set to 'Neon'."
-*   **(Cloud Example)** "@VibeBlocksMCP Upload './assets/MyCoolModel.fbx' as a Model named 'Cool Character Model'."
-*   **(Cloud Example)** "@VibeBlocksMCP Get the value for key 'player_123_score' from the 'PlayerData' datastore."
-*   **(Cloud Example)** "@VibeBlocksMCP Publish the current place."
-*   "@VibeBlocksMCP Show me the latest logs from the Studio output."
+*   "Create a bright red Part named 'Floor' in Workspace. Set its size to (100, 2, 100) and position to (0, -1, 0). Anchor it."
+*   "Delete the object named 'Workspace.OldPlatform'"
+*   "What is the Position property of 'Workspace.SpawnLocation'?"
+*   "List the children of ServerScriptService."
+*   "Find all instances with className 'Script' under ServerScriptService."
+*   "Execute this script in Studio: `print(game:GetService('Lighting').ClockTime)`"
+*   "Set the `ClockTime` property of Lighting to 14."
+*   "Clone 'ReplicatedStorage.Templates.EnemyNPC' and name the clone 'Guard1'. Parent it to Workspace."
+*   "Make the model named 'Workspace.Guard1' play animation asset 123456789."
+*   "Modify all children of 'Workspace.DecorationFolder' with className 'Part' to have their Material set to 'Neon'."
+*   **(Cloud Example)** "Upload './assets/MyCoolModel.fbx' as a Model named 'Cool Character Model'."
+*   **(Cloud Example)** "Get the value for key 'player_123_score' from the 'PlayerData' datastore."
+*   **(Cloud Example)** "Publish the current place."
+*   "Show me the latest logs from the Studio output."
 
 ## Available Tools
 
