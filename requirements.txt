@@ -1,0 +1,10 @@
+# Base MCP requirements (assuming mcp-server is installed separately or via setup.py)
+
+# Cloud API Client requirements
+python-dotenv
+aiohttp
+pydantic
+
+# FastAPI requirements for Plugin Communication
+fastapi
+uvicorn[standard] # Includes standard dependencies like websockets, httptools 

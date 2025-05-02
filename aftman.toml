@@ -1,0 +1,4 @@
+# aftman.toml
+ 
+[tools]
+rojo = "rojo-rbx/rojo@7.1.0" # Using version from Aftman README example 

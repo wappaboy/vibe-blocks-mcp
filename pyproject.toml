@@ -1,0 +1,30 @@
+[project]
+name = "roblox-mcp"
+version = "0.1.0"
+description = "Roblox Studio integration through the Model Context Protocol"
+readme = "README.md"
+requires-python = ">=3.10"
+authors = [
+    {name = "AI Assistant", email = "assistant@example.com"} # Replace with actual author info if desired
+]
+license = {text = "MIT"} # Or choose another appropriate license
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+]
+dependencies = [
+    "mcp[cli]>=1.3.0",
+    "python-dotenv>=1.0.0",
+    "requests>=2.30.0",
+]
+
+[project.scripts]
+roblox-mcp = "roblox_mcp.server:main"
+
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+package-dir = {"" = "src"}
