@@ -42,8 +42,8 @@ This allows an AI agent connected via MCP to understand and interact with your l
 **2. Clone the Repository:**
 
 ```bash
-git clone <repository-url> # Replace <repository-url> with the actual URL
-cd vibe-blocks-mcp # Or your repository directory name
+git clone https://github.com/majidmanzarpour/vibe-blocks-mcp 
+cd vibe-blocks-mcp
 ```
 
 **3. Install Dependencies:**
@@ -75,11 +75,11 @@ pip install -r requirements.lock # Or create requirements.txt from pyproject.tom
 **5. Install the Companion Plugin in Roblox Studio:**
 
 *   **Install Rojo:** If you don't have Rojo installed, follow the instructions on the [Rojo website](https://rojo.space/docs/install/).
-*   **Build the Plugin:** Navigate to the `roblox_mcp_plugin` directory in your terminal and run:
+*   **Build the Plugin (optional):** Navigate to the `roblox_mcp_plugin` directory in your terminal and run:
     ```bash
     rojo build default.project.json --output VibeBlocksMCP_Companion.rbxm
     ```
-    This will create a `VibeBlocksMCP_Companion.rbxm` file.
+    This will create a `VibeBlocksMCP_Companion.rbxm` file or you can use the one provided in the repository.
 *   **Install in Studio:**
     *   Find your Roblox Studio plugins folder:
         *   **Windows:** `%LOCALAPPDATA%\Roblox\Plugins`
@@ -107,11 +107,19 @@ pip install -r requirements.lock # Or create requirements.txt from pyproject.tom
 *   This service works with any AI client that supports the Model Context Protocol (MCP) via Server-Sent Events (SSE), such as Cursor, Windsurf, or potentially future versions of Claude Desktop.
 *   **Example using Cursor:**
     *   Go to `File > Settings > MCP` (or `Code > Settings > MCP` on Mac).
-    *   Click "Add New Server".
+    *   Click "Add New Global MCP Server".
     *   Enter the **SSE URL:** `http://localhost:8000/sse` (make sure to include the trailing `/sse`).
-    *   Give it a name (e.g., "Vibe Blocks Local").
-    *   Click "Add".
-*   The client should now detect the "VibeBlocksMCP" tool source and its available tools.
+    *   You may need to edit the mcp.json file
+    ```
+    {
+    "mcpServers": {
+      "Vibe Blocks MCP": {
+        "url": "http://localhost:8000/sse"
+        }
+      }
+    }
+    ```
+*   The client should now detect the "Vibe Blocks MCP" tool source and its available tools.
 
 ## Usage
 
