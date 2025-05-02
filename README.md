@@ -83,7 +83,7 @@ pip install -r requirements.lock # Or create requirements.txt from pyproject.tom
 *   **Install in Studio:**
     *   Find your Roblox Studio plugins folder:
         *   **Windows:** `%LOCALAPPDATA%\Roblox\Plugins`
-        *   **macOS:** `~/Library/Application Support/Roblox/Plugins` (You might need to use `Cmd+Shift+G` in Finder and paste the path to navigate there).
+        *   **macOS:** `~/Documents/Roblox/Plugins` (You might need to use `Cmd+Shift+G` in Finder and paste the path to navigate there, or click Plugin Folder in Roblox Studio).
     *   Move or copy the generated `VibeBlocksMCP_Companion.rbxm` file into this plugins folder.
 *   **Restart Roblox Studio:** The plugin should now be loaded automatically when you open Studio.
     *   **Note:** The plugin polls `http://localhost:8000/plugin_command`. If you change the server port, you'll need to update the `SERVER_URL` variable at the top of the Lua script (`roblox_mcp_plugin/src/Plugin.server.lua`) and rebuild the plugin.
