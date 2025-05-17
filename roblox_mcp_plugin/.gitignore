@@ -1,0 +1,13 @@
+# Roblox plugin build artifacts
+*.rbxm
+*.rbxmx
+
+# Specifically ignore the companion file
+VibeBlocksMCP_Companion.rbxm
+
+# Roblox Studio auto-generated backup files
+*.rbxl.lock
+*.rbxlx.lock
+
+# Temporary files
+*.tmp 
