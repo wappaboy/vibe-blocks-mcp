@@ -43,10 +43,18 @@ KNOWN_ROBLOX_SERVICES = {
 logging.basicConfig(level=logging.INFO,
                     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger("VibeBlocksMCPServer") # <<< RENAME
-# <<< Set main logger level to DEBUG >>>
-logger.setLevel(logging.DEBUG)
-logging.getLogger("roblox_mcp.roblox_client").setLevel(logging.DEBUG)
+# <<< Set main logger level to INFO >>>
+logger.setLevel(logging.INFO)
+logging.getLogger("roblox_mcp.roblox_client").setLevel(logging.INFO)
 logging.getLogger("src.roblox_mcp.sse").setLevel(logging.INFO) # Add logger for SSE module
+
+# 色付きログ用の定数
+GREEN = "\033[32m"
+YELLOW = "\033[33m"
+RESET = "\033[0m"
+
+# Disable FastAPI access logs
+logging.getLogger("uvicorn.access").setLevel(logging.WARNING)
 
 # --- Load Config Globally (Simpler than passing everywhere) ---
 try:
@@ -109,6 +117,82 @@ async def get_plugin_command():
         logger.exception("Error processing plugin command request")
         # Return an error response to the plugin
         raise HTTPException(status_code=500, detail="Internal server error processing command request")
+
+# Track connected clients and their last activity
+connected_clients = {}  # {client_id: {"last_activity": timestamp, "type": connection_type}}
+
+@app.middleware("http")
+async def track_connections(request: Request, call_next):
+    """Middleware to track client connections and disconnections."""
+    client = f"{request.client.host}:{request.client.port}"
+    current_time = time.time()
+    
+    # リクエストパスを取得して接続タイプを特定
+    path = request.url.path
+    connection_type = "Unknown"
+    if path == "/plugin_command":
+        connection_type = "Polling"
+    elif path == "/plugin_report_result":
+        connection_type = "Result Reporting"
+    elif path == "/receive_studio_logs":
+        connection_type = "Log Forwarding"
+    else:
+        connection_type = f"Other ({path})"
+    
+    # Check if this is a new connection
+    if client not in connected_clients:
+        connected_clients[client] = {
+            "last_activity": current_time,
+            "type": connection_type
+        }
+        # 接続タイプがPollingの場合は緑色のテキストで接続成功を表示
+        if connection_type == "Polling":
+            print(f"{GREEN}Roblox Studio successfully connected to MCP Server!{RESET}")
+            logger.info(f"New connection from Roblox Studio: {client} - Type: {connection_type}")
+        else:
+            # その他の接続タイプはデバッグレベルでログ出力（表示されない）
+            logger.debug(f"New connection from Roblox Studio: {client} - Type: {connection_type}")
+    else:
+        # Update last activity time
+        connected_clients[client]["last_activity"] = current_time
+    
+    try:
+        response = await call_next(request)
+        return response
+    except Exception as e:
+        # If an error occurs, the client might have disconnected
+        if client in connected_clients:
+            client_data = connected_clients.pop(client)
+            logger.info(f"Roblox Studio disconnected due to error: {client} - Type: {client_data['type']}")
+        raise e
+
+# Background task to check for disconnected clients
+async def check_disconnected_clients():
+    """Periodically check for clients that haven't polled recently."""
+    while True:
+        current_time = time.time()
+        timeout = 10.0  # Consider client disconnected if no activity for 10 seconds
+        
+        # Check each client's last activity time
+        for client, client_data in list(connected_clients.items()):
+            if current_time - client_data["last_activity"] > timeout:
+                client_data = connected_clients.pop(client)
+                
+                # Pollingタイプの接続（メイン接続）がタイムアウトした場合は、プラグインが無効化されたと判断して警告表示
+                if client_data["type"] == "Polling":
+                    print(f"{YELLOW}Warning: Roblox Studio plugin has been disabled or disconnected!{RESET}")
+                    logger.warning(f"Roblox Studio plugin disabled or disconnected: {client}")
+                else:
+                    # その他の接続タイプのタイムアウトはデバッグレベルでログ出力（表示されない）
+                    logger.debug(f"Roblox Studio disconnected (timeout): {client} - Type: {client_data['type']}")
+        
+        await asyncio.sleep(1.0)  # Check every second
+
+# Start the background task when the app starts
+@app.on_event("startup")
+async def startup_event():
+    asyncio.create_task(check_disconnected_clients())
+
 # --- End Endpoint for Studio Plugin ---
 
 # --- Add Endpoint for Reporting Plugin Results (NEW) ---

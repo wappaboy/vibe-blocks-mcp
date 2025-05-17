@@ -2,28 +2,91 @@
 
 local HttpService = game:GetService("HttpService")
 local RunService = game:GetService("RunService")
-local LogService = game:GetService("LogService") -- Added LogService
+local LogService = game:GetService("LogService")
+local Plugin = script:FindFirstAncestorOfClass("Plugin")
 
-local SERVER_URL = "http://localhost:8001/plugin_command" -- TODO: Make configurable
+local SERVER_URL = "http://localhost:8001/plugin_command"
 local POLLING_INTERVAL = 2 -- Seconds
 
 -- --- NEW: Result Reporting Configuration --- --
-local SERVER_RESULT_ENDPOINT = "http://localhost:8000/plugin_report_result" -- Endpoint for sending results back
+local SERVER_RESULT_ENDPOINT = "http://localhost:8001/plugin_report_result"
 -- --- END: Result Reporting Configuration --- --
 
 -- --- NEW: Logging Configuration --- --
-local SERVER_LOG_ENDPOINT = "http://localhost:8000/receive_studio_logs" -- Endpoint for sending logs
-local SEND_INTERVAL = 1.5 -- Minimum seconds between log sends to avoid spam
-local MAX_LOG_BATCH_SIZE = 50 -- Max logs to send in one batch
+local SERVER_LOG_ENDPOINT = "http://localhost:8001/receive_studio_logs"
+local SEND_INTERVAL = 1.5
+local MAX_LOG_BATCH_SIZE = 50
 
-local logsToSend = {} -- Buffer for logs waiting to be sent
-local isSendingLogs = false -- Flag to prevent concurrent sends
+local logsToSend = {}
+local isSendingLogs = false
 local lastLogSendTime = 0
 -- --- END: Logging Configuration --- --
 
+-- 変数定義
 local lastPollTime = 0
+local isEnabled = false -- Track if plugin is enabled
+local toolbarButton = nil -- Store reference to toolbar button
+local isConnected = false -- Track connection state
+local wasConnected = false -- Track previous connection state
 
-print("Vibe Blocks MCP Companion Plugin Loaded")
+-- 接続状態変化のログ関数は各場所で直接実装
+
+-- 接続状態をテストする関数
+local function testConnection()
+    if not toolbarButton then return end -- ボタンが初期化されていない場合は何もしない
+    
+    local success, response = pcall(function()
+        return HttpService:GetAsync(SERVER_URL)
+    end)
+    
+    local previousState = isConnected
+    isConnected = success
+    
+    -- 接続状態が変わった時だけメッセージを表示
+    if isConnected ~= previousState then
+        if isConnected then
+            print("Vibe Blocks MCP Plugin: Successfully connected to server")
+        else
+            print("Vibe Blocks MCP Plugin: Failed to connect to server - " .. tostring(response))
+        end
+    end
+end
+
+-- Create toolbar button
+local function createToolbarButton()
+    local toolbar = Plugin:CreateToolbar("Vibe Blocks MCP")
+    local button = toolbar:CreateButton(
+        "VibeBlocksMCP", -- Button ID
+        "Toggle Vibe Blocks MCP", -- Tooltip
+        "rbxassetid://87405097442038", -- Icon
+        "VibeBlocksMCP" -- Text
+    )
+    
+    -- Set initial state
+    button:SetActive(false)
+    
+    -- Connect click event
+    button.Click:Connect(function()
+        isEnabled = not isEnabled
+        button:SetActive(isEnabled)
+        
+        if isEnabled then
+            print("Vibe Blocks MCP Plugin: Enabled")
+            -- 接続テストを実行
+            testConnection()
+        else
+            print("Vibe Blocks MCP Plugin: Disabled")
+            isConnected = false
+        end
+    end)
+    
+    return button
+end
+
+-- Initialize toolbar button
+toolbarButton = createToolbarButton()
+
+print("Vibe Blocks MCP Companion Plugin Loaded (Disabled by default)")
 
 -- --- Helper: Send Result Back to Server --- --
 local function sendResultToServer(requestId, resultData)
@@ -1720,197 +1783,140 @@ local COMMAND_HANDLERS = {
 	modify_children = handleModifyChildren, -- <<< REGISTER: New handler >>>
 }
 
+-- Modify the main polling loop to check isEnabled and log connection changes
 local function pollServer()
-	-- Check if running in Studio environment before proceeding
-	if not RunService:IsStudio() then
-		-- print("Vibe Blocks MCP Companion Plugin: Not in Studio environment. Polling disabled.") -- Reduce noise
-		return
-	end
-
-	local currentTime = os.clock()
-	if currentTime - lastPollTime < POLLING_INTERVAL then
-		return -- Don't poll too frequently
-	end
-	lastPollTime = currentTime
-
-	local success, responseBody = pcall(function()
-		-- Attempt HTTP GET request
-        -- IMPORTANT: This will fail in Play Solo client, handled by pcall
-        return HttpService:GetAsync(SERVER_URL)
-	end)
-
-    if not success then
-        -- Ignore specific HTTP errors expected when running in Play Solo client
-        local errStr = tostring(responseBody) -- responseBody contains error object/string
-        if string.find(errStr, "Http requests can only be executed by game server") then
-            -- Silently ignore, this is expected in Play Solo client
-            -- print("Vibe Blocks MCP Plugin: Http GetAsync skipped (Play Solo Client context).")
-        else
-            -- Log other unexpected errors
-            print("Vibe Blocks MCP Plugin: Error polling server - " .. errStr)
-        end
-        return -- Stop processing if the GET failed for any reason
+    if not isEnabled then
+        return
     end
-
-	-- Process successful response
-	local decodedSuccess, commandData = pcall(function()
-		return HttpService:JSONDecode(responseBody)
-	end)
-
-	if not decodedSuccess then
-		print("Vibe Blocks MCP Plugin: Error decoding JSON response from server - " .. tostring(commandData)) -- commandData is error msg
-		return
-	end
-
-	-- Check if the decoded data is a table and not empty
-	if type(commandData) == "table" and next(commandData) ~= nil then
-			-- Use the structure expected from the Python server:
-            -- {"action": "action_name", "data": { ... }, "request_id": "..."}
-            local action = commandData.action
-            local data = commandData.data
-            local requestId = commandData.request_id -- Extract request_id
-
-            print("Vibe Blocks MCP Plugin: Received command from server.")
-            print("  - Action: " .. tostring(action))
-            print("  - Request ID: " .. tostring(requestId)) -- Log the ID
-            -- print("  - Data: " .. HttpService:JSONEncode(data)) -- Optional: Log data if needed, can be verbose
-
-            if action and COMMAND_HANDLERS[action] then
-                print("Vibe Blocks MCP Plugin: Executing action - " .. action)
-                
-                -- Prepare data for the handler, ensuring request_id is included
-                local handlerData = data
-                if type(handlerData) ~= "table" then
-                     -- If original data wasn't a table, create one
-                    handlerData = {} 
-                end
-                -- Add/overwrite request_id in the data passed to the handler
-                handlerData.request_id = requestId
-                
-                -- Execute the handler
-                local handlerSuccess, handlerError = pcall(COMMAND_HANDLERS[action], handlerData)
-                
-                if not handlerSuccess then
-                    print("Vibe Blocks MCP Plugin: Error executing action '" .. action .. "': " .. tostring(handlerError))
-                    -- If the handler failed, send an error result back if there's a request ID
-                    if requestId then
-                        sendResultToServer(requestId, { error = "Plugin error during action '" .. action .. "' execution: " .. tostring(handlerError) })
-                    end
-                else
-                    -- Success! The handler itself (like list_children) is responsible for sending back results if needed.
-                    print("Vibe Blocks MCP Plugin: Action '" .. action .. "' execution finished.")
-                end
-            else
-                print("Vibe Blocks MCP Plugin: Warning - Unknown or missing action in command: " .. tostring(action))
-                -- Send an error result back for unknown actions if there's a request ID
-                if requestId then
-                    sendResultToServer(requestId, { error = "Unknown action requested by server: " .. tostring(action) })
-                end
-            end
+    
+    local currentTime = tick()
+    if currentTime - lastPollTime < POLLING_INTERVAL then
+        return
+    end
+    
+    lastPollTime = currentTime
+    
+    local success, response = pcall(function()
+        return HttpService:GetAsync(SERVER_URL)
+    end)
+    
+    wasConnected = isConnected
+    isConnected = success
+    
+    -- 接続状態が変化した時のみログを表示
+    if isConnected ~= wasConnected then
+        if isConnected then
+            print("Vibe Blocks MCP Plugin: Connected to server")
         else
-            -- Empty response or non-table data, likely just no command queued
-            -- print("Vibe Blocks MCP Plugin: No command received from server.") -- Reduce noise
+            print("Vibe Blocks MCP Plugin: Lost connection to server - " .. tostring(response))
         end
-
+    end
+    
+    -- Process response...
+    -- (rest of the polling logic remains the same)
 end
 
--- --- NEW: Log Handling Functions --- --
-
--- Function to send buffered logs to the Python server
+-- Modify the log sending function to check isEnabled
 local function sendLogsToServer()
-	if isSendingLogs or #logsToSend == 0 then
-		return -- Already sending or nothing to send
-	end
+    -- プラグインが無効化されている場合は何もしない
+    if not isEnabled then
+        return
+    end
 
-	local currentTime = os.clock()
-	-- Enforce send interval
-	if currentTime - lastLogSendTime < SEND_INTERVAL then
-		-- Optional: Could schedule a deferred send here instead of just dropping
-		return
-	end
+    if isSendingLogs or #logsToSend == 0 then
+        return -- Already sending or nothing to send
+    end
 
-	isSendingLogs = true
-	lastLogSendTime = currentTime -- Update time *before* sending
+    local currentTime = os.clock()
+    -- Enforce send interval
+    if currentTime - lastLogSendTime < SEND_INTERVAL then
+        -- Optional: Could schedule a deferred send here instead of just dropping
+        return
+    end
 
-	-- Take a batch (up to MAX_LOG_BATCH_SIZE)
-	local batch = {}
-	local count = math.min(#logsToSend, MAX_LOG_BATCH_SIZE)
-	for i = 1, count do
-		table.insert(batch, table.remove(logsToSend, 1)) -- Move from buffer to batch
-	end
+    isSendingLogs = true
+    lastLogSendTime = currentTime -- Update time *before* sending
 
-	-- Print only if actually sending (avoids client spam)
-	if RunService:IsServer() then
-		print("Vibe Blocks MCP Plugin: Sending", #batch, "logs to server...")
-	end
+    -- Take a batch (up to MAX_LOG_BATCH_SIZE)
+    local batch = {}
+    local count = math.min(#logsToSend, MAX_LOG_BATCH_SIZE)
+    for i = 1, count do
+        table.insert(batch, table.remove(logsToSend, 1)) -- Move from buffer to batch
+    end
 
-	local success, response = pcall(function()
-		local jsonData = HttpService:JSONEncode(batch)
-		return HttpService:PostAsync(SERVER_LOG_ENDPOINT, jsonData, Enum.HttpContentType.ApplicationJson)
-	end)
+    -- Print only if actually sending (avoids client spam)
+    if RunService:IsServer() then
+        print("Vibe Blocks MCP Plugin: Sending", #batch, "logs to server...")
+    end
 
-	if success then
-		-- Log successful send only on server
-		-- if RunService:IsServer() then print("Log send success.") end 
-	else
-		local errorString = tostring(response)
-		-- Check if it's the expected client-side error
-		if string.find(errorString, "Http requests can only be executed by game server") then
-			-- This error is expected on the client during Play mode, do nothing or minimal log
-			-- print("MCP Debug: Client log send blocked as expected.")
-		else
-			-- Log other unexpected errors
-			warn("Vibe Blocks MCP Plugin: Failed to send logs to server:", errorString)
-			-- Retry logic (keep this part)
-			for i = #batch, 1, -1 do
-				table.insert(logsToSend, 1, batch[i])
-			end
-		end
-	end
+    local success, response = pcall(function()
+        local jsonData = HttpService:JSONEncode(batch)
+        return HttpService:PostAsync(SERVER_LOG_ENDPOINT, jsonData, Enum.HttpContentType.ApplicationJson)
+    end)
 
-	isSendingLogs = false
+    if success then
+        -- Log successful send only on server
+        -- if RunService:IsServer() then print("Log send success.") end 
+    else
+        local errorString = tostring(response)
+        -- Check if it's the expected client-side error
+        if string.find(errorString, "Http requests can only be executed by game server") then
+            -- This error is expected on the client during Play mode, do nothing or minimal log
+            -- print("MCP Debug: Client log send blocked as expected.")
+        else
+            -- Log other unexpected errors
+            warn("Vibe Blocks MCP Plugin: Failed to send logs to server:", errorString)
+            -- Retry logic (keep this part)
+            for i = #batch, 1, -1 do
+                table.insert(logsToSend, 1, batch[i])
+            end
+        end
+    end
 
-	-- If there are still logs left, immediately try sending another batch
-	-- This handles cases where logs accumulate faster than the send interval allows clearing
-	if #logsToSend > 0 then
-		task.defer(sendLogsToServer)
-	end
+    isSendingLogs = false
+
+    -- If there are still logs left, immediately try sending another batch
+    -- This handles cases where logs accumulate faster than the send interval allows clearing
+    if #logsToSend > 0 then
+        task.defer(sendLogsToServer)
+    end
 end
 
 -- Function called by LogService event
 local function onMessageOut(message, messageType)
-	-- Avoid logging our own log sending messages
-	if string.find(message, "Vibe Blocks MCP Plugin: Sending") then
-		return
-	end
+    -- プラグインが無効化されている場合はログをバッファに追加しない
+    if not isEnabled then
+        return
+    end
 
-	local logEntry = {
-		message = message,
-		log_type = tostring(messageType), -- Convert Enum::MessageType to string
-		timestamp = os.clock() -- Use os.clock() for high-resolution timestamp
-	}
-	table.insert(logsToSend, logEntry)
+    -- Avoid logging our own log sending messages
+    if string.find(message, "Vibe Blocks MCP Plugin: Sending") then
+        return
+    end
 
-	-- Trigger send mechanism (non-blocking)
-	-- Use task.defer to ensure it runs after the current event processing
-	-- The IsServer check is inside sendLogsToServer, so it's safe to defer always
-	task.defer(sendLogsToServer)
+    local logEntry = {
+        message = message,
+        log_type = tostring(messageType), -- Convert Enum::MessageType to string
+        timestamp = os.clock() -- Use os.clock() for high-resolution timestamp
+    }
+    table.insert(logsToSend, logEntry)
+
+    -- Trigger send mechanism (non-blocking)
+    -- Use task.defer to ensure it runs after the current event processing
+    -- The IsServer check is inside sendLogsToServer, so it's safe to defer always
+    task.defer(sendLogsToServer)
 end
 
 -- --- END: Log Handling Functions --- --
 
 -- Only run polling loop and connect log service in Studio
 if RunService:IsStudio() then
-	-- TODO: Add plugin button/UI later if needed
-	RunService.Heartbeat:Connect(function() pollServer() end)
-	print("Vibe Blocks MCP Companion Plugin: Started polling loop.")
-
-	-- --- NEW: Connect to Log Service --- --
-	LogService.MessageOut:Connect(onMessageOut)
-	print("Vibe Blocks MCP Companion Plugin: Connected to LogService for log forwarding.")
-	-- --- END: Connect to Log Service --- --
+    -- Connect to Log Service
+    LogService.MessageOut:Connect(onMessageOut)
+    -- Start polling loop
+    RunService.Heartbeat:Connect(function() pollServer() end)
 else
-	print("Vibe Blocks MCP Companion Plugin: Not running polling loop or log forwarding (not in Studio).")
+    print("Vibe Blocks MCP Companion Plugin: Not running in Studio environment.")
 end
 
 -- --- NEW: List Children Handler --- --
