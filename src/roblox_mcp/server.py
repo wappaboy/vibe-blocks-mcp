@@ -53,6 +53,10 @@ GREEN = "\033[32m"
 YELLOW = "\033[33m"
 RESET = "\033[0m"
 
+# プラグイン接続状態の追跡
+polling_connected = False
+polling_missed_count = 0
+
 # Disable FastAPI access logs
 logging.getLogger("uvicorn.access").setLevel(logging.WARNING)
 
@@ -124,6 +128,7 @@ connected_clients = {}  # {client_id: {"last_activity": timestamp, "type": conne
 @app.middleware("http")
 async def track_connections(request: Request, call_next):
     """Middleware to track client connections and disconnections."""
+    global polling_connected, polling_missed_count
     client = f"{request.client.host}:{request.client.port}"
     current_time = time.time()
     
@@ -132,6 +137,14 @@ async def track_connections(request: Request, call_next):
     connection_type = "Unknown"
     if path == "/plugin_command":
         connection_type = "Polling"
+        # ポーリング接続を検出したら接続状態をリセット
+        if not polling_connected:
+            polling_connected = True
+            polling_missed_count = 0
+            print(f"{GREEN}Roblox Studio successfully connected to MCP Server!{RESET}")
+        else:
+            # すでに接続済みの場合は、単にミスカウントをリセット
+            polling_missed_count = 0
     elif path == "/plugin_report_result":
         connection_type = "Result Reporting"
     elif path == "/receive_studio_logs":
@@ -145,13 +158,11 @@ async def track_connections(request: Request, call_next):
             "last_activity": current_time,
             "type": connection_type
         }
-        # 接続タイプがPollingの場合は緑色のテキストで接続成功を表示
-        if connection_type == "Polling":
-            print(f"{GREEN}Roblox Studio successfully connected to MCP Server!{RESET}")
-            logger.info(f"New connection from Roblox Studio: {client} - Type: {connection_type}")
-        else:
-            # その他の接続タイプはデバッグレベルでログ出力（表示されない）
+        # 新規接続のログは、メインのポーリング接続以外はデバッグレベルに
+        if connection_type != "Polling":
             logger.debug(f"New connection from Roblox Studio: {client} - Type: {connection_type}")
+        else:
+            logger.info(f"New connection from Roblox Studio: {client} - Type: {connection_type}")
     else:
         # Update last activity time
         connected_clients[client]["last_activity"] = current_time
@@ -169,22 +180,43 @@ async def track_connections(request: Request, call_next):
 # Background task to check for disconnected clients
 async def check_disconnected_clients():
     """Periodically check for clients that haven't polled recently."""
+    global polling_connected, polling_missed_count
     while True:
         current_time = time.time()
-        timeout = 10.0  # Consider client disconnected if no activity for 10 seconds
+        timeout = 15.0  # タイムアウト時間を15秒に延長
+        
+        polling_client_found = False
         
         # Check each client's last activity time
         for client, client_data in list(connected_clients.items()):
             if current_time - client_data["last_activity"] > timeout:
                 client_data = connected_clients.pop(client)
                 
-                # Pollingタイプの接続（メイン接続）がタイムアウトした場合は、プラグインが無効化されたと判断して警告表示
+                # Pollingタイプの接続の場合、特別な処理
                 if client_data["type"] == "Polling":
-                    print(f"{YELLOW}Warning: Roblox Studio plugin has been disabled or disconnected!{RESET}")
-                    logger.warning(f"Roblox Studio plugin disabled or disconnected: {client}")
+                    polling_missed_count += 1
+                    # 3回連続でミスしたら切断と判断
+                    if polling_missed_count >= 3 and polling_connected:
+                        polling_connected = False
+                        print(f"{YELLOW}Warning: Roblox Studio plugin has been disabled or disconnected!{RESET}")
+                        logger.warning(f"Roblox Studio plugin disabled or disconnected: {client}")
+                    else:
+                        # まだミス回数が足りない場合はデバッグログのみ
+                        logger.debug(f"Missed polling from Roblox Studio: {client} (count: {polling_missed_count})")
                 else:
-                    # その他の接続タイプのタイムアウトはデバッグレベルでログ出力（表示されない）
+                    # その他の接続タイプのタイムアウトはデバッグレベルでログ出力
                     logger.debug(f"Roblox Studio disconnected (timeout): {client} - Type: {client_data['type']}")
+            elif client_data["type"] == "Polling":
+                polling_client_found = True
+        
+        # ポーリングクライアントが見つからず、まだ接続中と思われている場合
+        if not polling_client_found and polling_connected:
+            polling_missed_count += 1
+            # 3回連続でミスしたら切断と判断
+            if polling_missed_count >= 3:
+                polling_connected = False
+                print(f"{YELLOW}Warning: Roblox Studio plugin has been disabled or disconnected!{RESET}")
+                logger.warning(f"Roblox Studio plugin disabled: No polling connection found")
         
         await asyncio.sleep(1.0)  # Check every second
 
