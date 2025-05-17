@@ -1277,7 +1277,7 @@ async def get_datastore_value_in_cloud(ctx: Context, datastore_name: str = Field
 @mcp_server.tool()
 async def set_datastore_value_in_cloud(ctx: Context, datastore_name: str = Field(..., description="The name of the datastore."),
                         entry_key: str = Field(..., description="The key of the entry to set."),
-                        value: Any = Field(..., description="The JSON-serializable value to store."),
+                        value: Any = Field(..., description="The JSON-serializable value to store. Can be a primitive, list, dictionary, or a JSON string of any of these types."),
                         scope: Optional[str] = Field("global", description="The scope (defaults to 'global')."),
                        ) -> str:
     """Sets the value for an entry in a standard datastore via the Roblox Cloud API."""
@@ -1287,7 +1287,17 @@ async def set_datastore_value_in_cloud(ctx: Context, datastore_name: str = Field
         return "Error: Roblox Client could not be initialized."
 
     try:
-        result = await client.set_datastore_entry(datastore_name=datastore_name, entry_key=entry_key, value=value, scope=scope)
+        # Parse value if it's a JSON string
+        parsed_value = value
+        if isinstance(value, str):
+            try:
+                parsed_value = json.loads(value)
+                logger.debug(f"Parsed value from JSON string: {parsed_value}")
+            except json.JSONDecodeError:
+                # Not JSON, just use as is
+                logger.debug(f"Using value as regular string: {value}")
+        
+        result = await client.set_datastore_entry(datastore_name=datastore_name, entry_key=entry_key, value=parsed_value, scope=scope)
         version = result.get("version")
         return f"Successfully set value for key '{entry_key}'. New version: {version}"
 
@@ -1462,19 +1472,32 @@ async def publish_place_via_cloud(ctx: Context, target_place_id: Optional[int] =
 
 @mcp_server.tool()
 async def set_environment(ctx: Context,
-                      properties: Dict[str, Any] = Field(..., description="Dictionary of properties to set on the Lighting service or Terrain.")) -> str:
+                      properties: Union[Dict[str, Any], str] = Field(..., description="Dictionary of properties to set on the Lighting service or Terrain, or a JSON string of the properties dictionary.")) -> str:
     """Sets properties on environment services like Lighting or Terrain."""
     logger.info(f"Setting environment properties: {properties}")
     
-    # Determine target service based on properties
-    target = "Lighting"
-    terrain_props = ["WaterColor", "WaterWaveSize", "WaterWaveSpeed", "WaterReflectance", "WaterTransparency"]
-    if any(prop in properties for prop in terrain_props):
-        target = "Terrain"
-    
     try:
+        # Process properties if it's a JSON string
+        props_dict = properties
+        if isinstance(properties, str):
+            try:
+                props_dict = json.loads(properties)
+                logger.debug(f"Parsed properties dictionary from string: {props_dict}")
+            except json.JSONDecodeError as e:
+                logger.error(f"Failed to parse properties JSON string: {e}")
+                return f"Error: Invalid properties JSON format: {e}"
+
+        if not isinstance(props_dict, dict):
+            return f"Error: Properties must be a dictionary or a JSON string of a dictionary."
+            
+        # Determine target service based on properties
+        target = "Lighting"
+        terrain_props = ["WaterColor", "WaterWaveSize", "WaterWaveSpeed", "WaterReflectance", "WaterTransparency"]
+        if any(prop in props_dict for prop in terrain_props):
+            target = "Terrain"
+        
         # Check for invalid property names 
-        for key in properties.keys():
+        for key in props_dict.keys():
             if not re.match(r"^\w+$", key):
                 return f"Error: Invalid property name format: {key}"
         
@@ -1483,7 +1506,7 @@ async def set_environment(ctx: Context,
             "action": "set_environment",
             "data": {
                 "target": target,
-                "properties": properties
+                "properties": props_dict
             }
         }
         
@@ -1513,7 +1536,7 @@ async def set_environment(ctx: Context,
 @mcp_server.tool()
 async def spawn_npc(ctx: Context, model_asset_id: Optional[int] = Field(None, description="Asset ID of the NPC model to insert from Roblox library."),
                 template_model_name: Optional[str] = Field(None, description="Name of an existing model in the place (e.g., in ServerStorage) to clone as the NPC."),
-                position: Optional[List[float]] = Field([0,5,0], description="Position [X, Y, Z] where the NPC should be spawned."),
+                position: Optional[Union[List[float], Dict[str, float], str]] = Field([0,5,0], description="Position as [X, Y, Z] list, {x, y, z} dictionary, or a JSON string of either format."),
                 parent_name: str = Field("Workspace", description="Parent object for the spawned NPC (defaults to Workspace)."),
                 new_name: Optional[str] = Field(None, description="Optional name for the spawned NPC instance.")) -> str:
     """Spawns an NPC in the workspace, either by inserting a model from asset ID or cloning an existing template model."""
@@ -1527,14 +1550,36 @@ async def spawn_npc(ctx: Context, model_asset_id: Optional[int] = Field(None, de
         template_model_name = None  # Prioritize asset ID
     
     try:
-        # Convert position to dictionary format expected by the plugin
+        # Process position based on input type
         position_dict = None
-        if position and len(position) == 3:
+        
+        # If position is a string, try to parse it as JSON
+        if isinstance(position, str):
+            try:
+                parsed_position = json.loads(position)
+                logger.debug(f"Parsed position from JSON string: {parsed_position}")
+                position = parsed_position
+            except json.JSONDecodeError as e:
+                logger.error(f"Failed to parse position JSON string: {e}")
+                return f"Error: Invalid position JSON format: {e}"
+        
+        # Now position is either a list or dictionary (or None)
+        if isinstance(position, list) and len(position) == 3:
             position_dict = {
                 "x": float(position[0]),
                 "y": float(position[1]),
                 "z": float(position[2])
             }
+        elif isinstance(position, dict) and all(k in position for k in ['x', 'y', 'z']):
+            # Already in the right format
+            position_dict = {
+                "x": float(position["x"]),
+                "y": float(position["y"]),
+                "z": float(position["z"])
+            }
+        elif position is not None:
+            logger.warning(f"Invalid position format: {position}")
+            return "Error: Position must be a list of 3 numbers, a dictionary with x,y,z keys, or a JSON string of either format."
         
         # Create command for the plugin
         command = {
@@ -1686,7 +1731,7 @@ async def send_chat_via_cloud(ctx: Context, message: str = Field(..., descriptio
 @mcp_server.tool()
 async def teleport_player_via_cloud(ctx: Context, player_name: str = Field(..., description="The exact name of the Player to teleport."),
                       destination_place_id: int = Field(..., description="The Place ID to teleport the player to."),
-                      teleport_options: Optional[Dict[str, Any]] = Field(None, description="Optional TeleportOptions dictionary."),
+                      teleport_options: Optional[Union[Dict[str, Any], str]] = Field(None, description="Optional TeleportOptions dictionary or a JSON string of the options."),
                       custom_loading_script: Optional[str] = Field(None, description="Optional LocalScript name (in ReplicatedFirst) for custom loading screen.")) -> str:
     """Teleports a player via the Roblox Cloud API (execute_luau).
        Requires TeleportService.
@@ -1697,8 +1742,18 @@ async def teleport_player_via_cloud(ctx: Context, player_name: str = Field(..., 
         return "Error: Roblox Client could not be initialized."
 
     try:
+        # Process teleport_options if it's a JSON string
+        options_dict = teleport_options
+        if isinstance(teleport_options, str):
+            try:
+                options_dict = json.loads(teleport_options)
+                logger.debug(f"Parsed teleport options from JSON string: {options_dict}")
+            except json.JSONDecodeError as e:
+                logger.error(f"Failed to parse teleport options JSON string: {e}")
+                return f"Error: Invalid teleport options JSON format: {e}"
+
         lua_player_name = escape_lua_string(player_name)
-        lua_options = value_to_lua_string(teleport_options) if teleport_options else "nil"
+        lua_options = value_to_lua_string(options_dict) if options_dict else "nil"
         lua_loading_script = f"game:GetService(\"ReplicatedFirst\"):FindFirstChild({escape_lua_string(custom_loading_script)})" if custom_loading_script else "nil"
 
         script = f"""
@@ -1892,11 +1947,11 @@ async def execute_luau_in_studio(ctx: Context, script_code: str = Field(..., des
 async def modify_children(ctx: Context,
                         parent_path: str = Field(..., description="Path to the parent object whose children will be modified."),
                         property_name: str = Field(..., description="The name of the property to set on matching children."),
-                        property_value: str = Field(..., description='JSON string for the value to set (same format as set_property: primitives or escaped JSON for complex types, e.g., \'"[1,2,3]"\').'),
+                        property_value: Any = Field(..., description='Value to set - can be a primitive (string, number, boolean), list, dictionary, or a JSON string of any of these types.'),
                         child_name_filter: Optional[str] = Field(None, description="Optional: Only modify children with this exact name."),
                         child_class_filter: Optional[str] = Field(None, description="Optional: Only modify children of this exact ClassName.")) -> str:
     """Finds direct children under a parent matching optional filters (name/class) and sets a specified property on them."""
-    logger.info(f"Modifying children under '{parent_path}' (Name: {child_name_filter or 'Any'}, Class: {child_class_filter or 'Any'}) - Set '{property_name}' from JSON: {property_value}")
+    logger.info(f"Modifying children under '{parent_path}' (Name: {child_name_filter or 'Any'}, Class: {child_class_filter or 'Any'}) - Set '{property_name}' to value: {property_value}")
 
     # Basic validation
     if not re.match(r"^[\w.]+$", parent_path):
@@ -1909,13 +1964,17 @@ async def modify_children(ctx: Context,
          return f"Error: Invalid child_class_filter format: {child_class_filter}"
 
     try:
-        # Parse the JSON string value
-        try:
-            parsed_value = json.loads(property_value)
-            logger.debug(f"Parsed property value: {parsed_value} (Type: {type(parsed_value).__name__})")
-        except json.JSONDecodeError as json_err:
-            logger.error(f"Invalid JSON string provided for property_value: {property_value} - Error: {json_err}")
-            return f"Error: Invalid JSON format for property_value parameter. Details: {json_err}"
+        # Parse the value if it's a string that might be JSON
+        parsed_value = property_value
+        if isinstance(property_value, str):
+            try:
+                parsed_value = json.loads(property_value)
+                logger.debug(f"Parsed property value from string: {parsed_value}")
+            except json.JSONDecodeError:
+                # If JSON parsing fails, it could be a simple string value
+                # Don't treat as error, just use the original string
+                logger.debug(f"Using property_value as regular string: {property_value}")
+                parsed_value = property_value
 
         # Create command for the plugin
         command = {

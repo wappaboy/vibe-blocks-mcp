@@ -36,6 +36,7 @@ This document contains specific guidelines for AI assistants working on the Vibe
 - Follow PEP 8 style guidelines
 - Use type hints consistently
 - Handle errors gracefully and provide informative messages
+- For API parameters, support both direct data structures and their JSON string representations
 
 ### Lua (Roblox)
 - Follow Roblox Lua style guidelines
@@ -49,6 +50,14 @@ This document contains specific guidelines for AI assistants working on the Vibe
    - Modified functions to accept both JSON strings and direct data structures
    - Used conditional type checking and parsing
    - Added clear documentation for both usage patterns
+   - Functions modified:
+     - `move_instance`: Accepts both dictionary and JSON string for position parameter
+     - `set_property`: Accepts any data type with special handling for strings
+     - `spawn_npc`: Accepts list, dictionary, or JSON string for position parameter
+     - `set_environment`: Accepts dictionary or JSON string for properties parameter
+     - `teleport_player_via_cloud`: Accepts dictionary or JSON string for teleport_options
+     - `modify_children`: Accepts any data type with JSON parsing for strings
+     - `set_datastore_value_in_cloud`: Added JSON string parsing for value parameter
 
 2. **Error Handling Improvements**
    - Enhanced error messages to be more descriptive
