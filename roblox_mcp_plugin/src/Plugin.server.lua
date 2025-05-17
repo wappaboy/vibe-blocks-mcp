@@ -4,7 +4,7 @@ local HttpService = game:GetService("HttpService")
 local RunService = game:GetService("RunService")
 local LogService = game:GetService("LogService") -- Added LogService
 
-local SERVER_URL = "http://localhost:8000/plugin_command" -- TODO: Make configurable
+local SERVER_URL = "http://localhost:8001/plugin_command" -- TODO: Make configurable
 local POLLING_INTERVAL = 2 -- Seconds
 
 -- --- NEW: Result Reporting Configuration --- --
