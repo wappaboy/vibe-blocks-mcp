@@ -900,42 +900,38 @@ async def delete_instance(ctx: Context, object_name: str = Field(..., descriptio
 async def set_property(ctx: Context,
                      object_name: str = Field(..., description="Name or path of the object."),
                      property_name: str = Field(..., description="Name of the property to set."),
-                     # <<< CHANGE: Added example of escaped JSON string >>>
-                     value: str = Field(..., description='JSON string for the value (e.g., `"hello"`, `5`, `true`, `null`, `"[1,2,3]"`, `"{\\"key\\":\\"val\\"}"`). Primitives are passed directly. Complex types (like lists or dicts) must be valid JSON *within* the string.') 
+                     value: Any = Field(..., description='Property value - can be a primitive (string, number, boolean, null), a list/array, a dictionary/object, or a JSON string representation of these types.')
                      ) -> str:
-    """Sets a specific property on an object using a JSON string input. 
--       NOTE: Requires the value parameter to be a string containing valid JSON due to framework limitations. 
--       Crucially, when providing the JSON payload for the tool call, complex types must be represented as *escaped JSON strings*.
--       Tool Call Payload Examples for 'value':
--       - String:    `"\"hello\""`
--       - Number:    `"5"`
--       - Boolean:   `"true"`
--       - Nil:       `"null"`
--       - List/Vec3: `"[0, 10, 0]"`
--       - Dict:      `"{\"name\": \"MyPart\"}"`
--       The inner Python function then parses the string content (e.g., '[0, 10, 0]').
--       Use specific tools (e.g., move_instance, set_primary_part) or create_instance (with properties) for complex types where possible.
-+       The 'value' parameter should be a string containing valid JSON representing the desired value.
-+       - For primitive types (string, number, boolean, nil), provide them as standard JSON strings: `"\"hello\""`, `"5"`, `"true"`, `"null"`.
-+       - For complex types (like Vector3, Color3, lists, dictionaries), provide the JSON representation as a string: `"[0, 10, 0]"`, `"{\"r\": 1, \"g\": 0, \"b\": 0}"`.
-+       The plugin will attempt to convert the parsed JSON value to the appropriate Roblox type based on the property name.
-+       Use specific tools (e.g., move_instance, set_primary_part, create_instance with properties) for complex types where possible, as they offer better type handling.
-     """
-    logger.info(f"Setting property '{property_name}' on '{object_name}' from JSON string: {value}")
+    """Sets a specific property on an object.
+       The 'value' parameter can be provided in multiple formats:
+       - Primitive types (string, number, boolean, null) can be passed directly
+       - Complex types (lists, dictionaries) can be passed directly
+       - Any type can also be passed as a JSON string representation
+       
+       Examples: "hello" (string), 5 (number), true (boolean), [0,10,0] (Vector3 as list),
+       {"x":0,"y":10,"z":0} (Vector3 as dictionary), or their string representations.
+       
+       The plugin will attempt to convert the value to the appropriate Roblox type based on the property name.
+    """
+    logger.info(f"Setting property '{property_name}' on '{object_name}' with value: {value}")
     
     try:
-        # Manually parse the JSON string value again
-        try:
-            parsed_value = json.loads(value)
-            logger.debug(f"Parsed value type from JSON string: {type(parsed_value).__name__}")
-        except json.JSONDecodeError as json_err:
-            logger.error(f"Invalid JSON string provided for value: {value} - Error: {json_err}")
-            return f"Error: Invalid JSON format for value parameter. Details: {json_err}"
+        # Process value: parse if string, use directly otherwise
+        parsed_value = value
+        if isinstance(value, str):
+            try:
+                parsed_value = json.loads(value)
+                logger.debug(f"Parsed value from string: {parsed_value}")
+            except json.JSONDecodeError as json_err:
+                # If JSON parsing fails, it could be a simple string value
+                # Don't treat as error, just use the original string
+                logger.debug(f"JSON parsing failed, treating as regular string: {value}")
+                parsed_value = value
 
         if not re.match(r"^\w+$", property_name):
             return f"Error: Invalid property name format: {property_name}"
 
-        # Create command for the plugin with the PARSED value
+        # Create command for the plugin
         command = {
             "action": "set_property",
             "data": {
@@ -961,7 +957,7 @@ async def set_property(ctx: Context,
 
     except TimeoutError:
         return f"Error: Timeout waiting for Studio plugin to set property '{property_name}' on '{object_name}'."
-    except ValueError as e: # Catch other potential errors like invalid property name format
+    except ValueError as e: # Catch potential errors like invalid property name format
         return f"Error: {e}"
     except Exception as e:
         logger.exception("Unexpected error in set_property tool.")
@@ -1011,31 +1007,32 @@ async def set_primary_part(ctx: Context,
 
 @mcp_server.tool()
 async def move_instance(ctx: Context, object_name: str = Field(..., description="Name or path of the object to move."),
-                  # <<< CHANGE: Expect standard JSON string for dictionary >>>
-                  position: str = Field(..., description='JSON string for the position dictionary, e.g., `"{\"x\": 0, \"y\": 10, \"z\": 0}"`.')
+                  position: Union[str, Dict[str, float]] = Field(..., description='Position as a dictionary with x, y, z keys, or a JSON string for the position dictionary, e.g., `"{\"x\": 0, \"y\": 10, \"z\": 0}"`.')
                   ) -> str:
-    """Moves an object to a new position using a JSON string dictionary for the position."""
-    logger.info(f"Moving '{object_name}' from position JSON string: {position}")
+    """Moves an object to a new position using either a dictionary or a JSON string for the position."""
+    logger.info(f"Moving '{object_name}' with position input: {position}")
     
     try:
-        # <<< ADD: Parse JSON string to dictionary >>>
-        try:
-            position_dict = json.loads(position)
-            logger.debug(f"Parsed position dictionary: {position_dict}")
-        except json.JSONDecodeError as json_err:
-            logger.error(f"Invalid JSON string provided for position: {position} - Error: {json_err}")
-            return f"Error: Invalid JSON format for position parameter. Expected a dictionary string like '{{\"x\":0, \"y\":0, \"z\":0}}'. Details: {json_err}"
+        # Process position based on input type
+        position_dict = position
+        if isinstance(position, str):
+            try:
+                position_dict = json.loads(position)
+                logger.debug(f"Parsed position dictionary from string: {position_dict}")
+            except json.JSONDecodeError as json_err:
+                logger.error(f"Invalid JSON string provided for position: {position} - Error: {json_err}")
+                return f"Error: Invalid JSON format for position parameter. Expected a dictionary string like '{{\"x\":0, \"y\":0, \"z\":0}}'. Details: {json_err}"
 
-        # <<< CHANGE: Validate parsed dictionary >>>
+        # Validate dictionary structure
         if not isinstance(position_dict, dict) or not all(k in position_dict for k in ['x', 'y', 'z']) or not all(isinstance(position_dict[k], (int, float)) for k in ['x', 'y', 'z']):
-            return "Error: Invalid position dictionary structure after parsing JSON. Expected keys 'x', 'y', 'z' with number values."
+            return "Error: Invalid position dictionary structure. Expected keys 'x', 'y', 'z' with number values."
     
-        # Create command for the plugin, using the PARSED position dict
+        # Create command for the plugin
         command = {
             "action": "move_instance",
             "data": {
                 "object_name": object_name,
-                "position": position_dict # Pass the parsed dictionary
+                "position": position_dict
             }
         }
         
@@ -1046,14 +1043,13 @@ async def move_instance(ctx: Context, object_name: str = Field(..., description=
         if "error" in result:
             return f"Error moving '{object_name}': {result['error']}"
         elif "success" in result and result["success"]:
-            # Format output using dict values from parsed dict
             return f"Successfully moved '{object_name}' to position (x={position_dict['x']}, y={position_dict['y']}, z={position_dict['z']})."
         else:
             return f"Error: Unexpected result format from plugin while moving instance."
 
     except TimeoutError:
         return f"Error: Timeout waiting for Studio plugin to move '{object_name}'."
-    except ValueError as e: # Catch other potential errors
+    except ValueError as e:
         return f"Error: {e}"
     except Exception as e:
         logger.exception("Unexpected error in move_instance tool.")
