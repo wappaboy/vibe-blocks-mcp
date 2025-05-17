@@ -35,12 +35,40 @@ local wasConnected = false -- Track previous connection state
 local function testConnection()
     if not toolbarButton then return end -- ボタンが初期化されていない場合は何もしない
     
+    print("Vibe Blocks MCP Plugin: DEBUG - 接続テスト実行開始")
+    
     local success, response = pcall(function()
         return HttpService:GetAsync(SERVER_URL)
     end)
     
     local previousState = isConnected
     isConnected = success
+    
+    -- 詳細デバッグ
+    if success then
+        print("Vibe Blocks MCP Plugin: DEBUG - サーバー応答: " .. 
+            (response == "" and "空" or 
+            string.sub(response, 1, 100) .. (string.len(response) > 100 and "..." or "")))
+            
+        -- レスポンスがJSONかどうか確認
+        local jsonSuccess, jsonData = pcall(function()
+            return HttpService:JSONDecode(response)
+        end)
+        
+        if jsonSuccess then
+            if type(jsonData) == "table" then
+                if next(jsonData) == nil then
+                    print("Vibe Blocks MCP Plugin: DEBUG - サーバーから空のオブジェクト/配列を受信")
+                else
+                    print("Vibe Blocks MCP Plugin: DEBUG - サーバーからJSONオブジェクトを受信")
+                end
+            end
+        else
+            print("Vibe Blocks MCP Plugin: DEBUG - サーバーからの応答はJSON形式ではありません")
+        end
+    else
+        print("Vibe Blocks MCP Plugin: DEBUG - 接続テスト失敗: " .. tostring(response))
+    end
     
     -- 接続状態が変わった時だけメッセージを表示
     if isConnected ~= previousState then
@@ -57,13 +85,34 @@ local function createToolbarButton()
     local toolbar = Plugin:CreateToolbar("Vibe Blocks MCP")
     local button = toolbar:CreateButton(
         "VibeBlocksMCP", -- Button ID
-        "Toggle Vibe Blocks MCP", -- Tooltip
-        "rbxassetid://87405097442038", -- Icon
-        "VibeBlocksMCP" -- Text
+        "VibeBlocksMCP", -- Text
+        "rbxassetid://87405097442038" -- Icon
     )
     
     -- Set initial state
     button:SetActive(false)
+    
+    -- HTTPサービスの状態確認
+    local httpEnabled = false
+    local httpStatusMsg = "不明"
+    
+    local success, status = pcall(function()
+        return HttpService.HttpEnabled
+    end)
+    
+    if success then
+        httpEnabled = status
+        httpStatusMsg = httpEnabled and "有効" or "無効"
+    else
+        httpStatusMsg = "エラー: " .. tostring(status)
+    end
+    
+    print("Vibe Blocks MCP Plugin: 診断情報")
+    print("  - プラグインID: " .. Plugin.Name)
+    print("  - HttpService状態: " .. httpStatusMsg)
+    print("  - 実行環境: " .. (RunService:IsStudio() and "Roblox Studio" or "その他"))
+    print("  - サーバーURL: " .. SERVER_URL)
+    print("  - 結果送信URL: " .. SERVER_RESULT_ENDPOINT)
     
     -- Connect click event
     button.Click:Connect(function()
@@ -71,11 +120,12 @@ local function createToolbarButton()
         button:SetActive(isEnabled)
         
         if isEnabled then
-            print("Vibe Blocks MCP Plugin: Enabled")
+            print("Vibe Blocks MCP Plugin: 有効化")
+            print("Vibe Blocks MCP Plugin: サーバー接続テスト開始...")
             -- 接続テストを実行
             testConnection()
         else
-            print("Vibe Blocks MCP Plugin: Disabled")
+            print("Vibe Blocks MCP Plugin: 無効化")
             isConnected = false
         end
     end)
@@ -86,44 +136,76 @@ end
 -- Initialize toolbar button
 toolbarButton = createToolbarButton()
 
-print("Vibe Blocks MCP Companion Plugin Loaded (Disabled by default)")
 
 -- --- Helper: Send Result Back to Server --- --
 local function sendResultToServer(requestId, resultData)
+	-- 詳細なデバッグ出力
+	print("Vibe Blocks MCP Plugin: DEBUG - 結果送信開始 requestId=" .. tostring(requestId))
+	
 	if not requestId then
-		print("Vibe Blocks MCP Plugin: Error - Cannot send result without a request ID.")
+		print("Vibe Blocks MCP Plugin: エラー - リクエストIDなしで結果を送信できません")
 		return
 	end
 	
 	local payload = {
 		request_id = requestId,
-		result = resultData -- This should be a table (will be JSON encoded)
+		result = resultData or {} -- resultDataがnilの場合は空のテーブルを使用
 	}
 	
+	-- JSONエンコード処理
 	local success, encodedPayload = pcall(function()
 		return HttpService:JSONEncode(payload)
 	end)
 	
 	if not success then
-		print("Vibe Blocks MCP Plugin: Error - Failed to JSON encode result payload for request ID " .. requestId .. ": " .. tostring(encodedPayload)) -- encodedPayload is error message here
+		print("Vibe Blocks MCP Plugin: エラー - JSONエンコード失敗: " .. tostring(encodedPayload))
 		return
 	end
 	
-	print("Vibe Blocks MCP Plugin: Sending result for request ID " .. requestId .. " to " .. SERVER_RESULT_ENDPOINT)
+	print("Vibe Blocks MCP Plugin: DEBUG - POST送信準備完了: エンドポイント=" .. SERVER_RESULT_ENDPOINT .. " データ長=" .. string.len(encodedPayload))
 	
-	local postSuccess, postError = pcall(function()
-		-- Use PostAsync for non-blocking request
-		HttpService:PostAsync(SERVER_RESULT_ENDPOINT, encodedPayload, Enum.HttpContentType.ApplicationJson)
+	-- HTTPリクエスト送信
+	local postSuccess, postResult = pcall(function()
+		print("Vibe Blocks MCP Plugin: DEBUG - HTTPリクエスト実行前")
+		local result = HttpService:PostAsync(
+			SERVER_RESULT_ENDPOINT,
+			encodedPayload,
+			Enum.HttpContentType.ApplicationJson,
+			false
+		)
+		print("Vibe Blocks MCP Plugin: DEBUG - HTTPリクエスト実行後: 結果長=" .. (result and string.len(result) or 0))
+		return result
 	end)
 	
-	if not postSuccess then
-		print("Vibe Blocks MCP Plugin: Error - Failed to POST result to server for request ID " .. requestId .. ": " .. tostring(postError))
-		-- Maybe implement retry logic later if needed
+	if postSuccess then
+		print("Vibe Blocks MCP Plugin: 結果送信成功 - " .. tostring(requestId))
 	else
-		print("Vibe Blocks MCP Plugin: Successfully posted result for request ID " .. requestId)
+		print("Vibe Blocks MCP Plugin: エラー - 結果送信失敗: " .. tostring(postResult))
+		-- HTTP権限エラーの詳細検出
+		local errorMessage = tostring(postResult)
+		if string.find(errorMessage, "not allowed") or 
+		   string.find(errorMessage, "permission") or
+		   string.find(errorMessage, "HttpService") or
+		   string.find(errorMessage, "must be enabled") then
+			print("Vibe Blocks MCP Plugin: ===== HTTP権限エラー =====")
+			print("Vibe Blocks MCP Plugin: プラグイン設定でHTTP権限確認が必要です。")
+			print("Vibe Blocks MCP Plugin: 1. Roblox Studioメニューから [ファイル]->[スタジオ設定] を開く")
+			print("Vibe Blocks MCP Plugin: 2. [セキュリティ]タブの[APIサービス]セクションで")
+			print("Vibe Blocks MCP Plugin: 3. 'プラグインのHTTPリクエストを許可する'をオンにしてください")
+		end
 	end
 end
 -- --- End Helper: Send Result --- --
+
+-- --- Helper: Get Full Path for an Instance --- --
+local function getFullPath(instance)
+	if instance then
+		return instance:GetFullName()
+	else
+		return "nil"
+	end
+end
+-- --- End Helper: Get Full Path --- --
 
 local function findObjectFromPath(pathString)
 	-- Simple path traversal (game, workspace, or starts with game/workspace)
@@ -380,73 +462,6 @@ local function handleSetEnvironment(data)
 		resultPayload.errors = propertyErrors
 		resultPayload.error = "Failed to set one or more properties." -- General error message
 		print("Vibe Blocks MCP Plugin: Finished setting environment properties with errors.")
-	end
-
-	-- Send final result
-	if requestId then sendResultToServer(requestId, resultPayload) end
-end
-
-local function handleCreateInstance(data)
-	local className = data.class_name
-	local parentName = data.parent_name or "Workspace" -- Default to Workspace
-	local properties = data.properties or {} -- Default to empty table
-    local requestId = data.request_id -- Extract request ID
-
-	local resultPayload = {} -- Initialize result payload
-
-	if not className then
-		resultPayload.error = "Missing 'class_name' in create_instance data."
-		print("Vibe Blocks MCP Plugin: Error - " .. resultPayload.error)
-		if requestId then sendResultToServer(requestId, resultPayload) end
-		return
-	end
-
-	-- Find the parent
-	local parentObject = findObjectFromPath(parentName)
-	if not parentObject then
-		resultPayload.error = "Could not find parent object for create_instance: " .. parentName
-		print("Vibe Blocks MCP Plugin: Error - " .. resultPayload.error)
-		if requestId then sendResultToServer(requestId, resultPayload) end
-		return
-	end
-
-	print(string.format("Vibe Blocks MCP Plugin: Creating instance of '%s' under '%s'", className, parentObject:GetFullName()))
-
-	local success, newInstanceOrError = pcall(function()
-		local inst = Instance.new(className)
-		inst.Parent = parentObject -- Parent first
-
-		-- Apply properties using the new converter
-		for propName, propValue in pairs(properties) do
-			print(string.format("  - Applying property '%s' with value type: %s", propName, type(propValue)))
-			local robloxValue, convertError = convertToRobloxType(propName, propValue)
-
-			if convertError then
-				-- If conversion fails, wrap the error (will be caught by outer pcall)
-				error(string.format("Error converting value for property '%s': %s", propName, convertError))
-			else
-				-- Assign the converted value
-				local setSuccess, setError = pcall(function()
-					inst[propName] = robloxValue
-				end)
-				if not setSuccess then
-					-- If setting the converted value fails, wrap the error
-					error(string.format("Error setting property '%s' after conversion: %s", propName, tostring(setError)))
-				end
-			end
-		end
-		return inst -- Return the instance if all properties were set successfully
-	end)
-
-	if success then
-		local newInstance = newInstanceOrError
-		resultPayload.success = true
-		resultPayload.name = newInstance.Name
-		resultPayload.path = newInstance:GetFullName()
-		print("Vibe Blocks MCP Plugin: Finished creating instance " .. resultPayload.path)
-	else
-		resultPayload.error = "Failed to create instance: " .. tostring(newInstanceOrError)
-		print("Vibe Blocks MCP Plugin: " .. resultPayload.error)
 	end
 
 	-- Send final result
@@ -1655,8 +1670,21 @@ end
 -- --- END: Modify Children Handler --- --
 
 local function executeCommand(commandData)
+	if not commandData then
+		print("Vibe Blocks MCP Plugin: エラー - 無効なコマンドデータ (nil)")
+		return
+	end
+	
 	local action = commandData.action
-	print("Vibe Blocks MCP Plugin: Executing action - " .. (action or "nil"))
+	
+	if not action then
+		print("Vibe Blocks MCP Plugin: エラー - コマンドにactionがありません")
+		print("Vibe Blocks MCP Plugin: DEBUG - 受信データ: " .. HttpService:JSONEncode(commandData))
+		return
+	end
+	
+	print("Vibe Blocks MCP Plugin: コマンド実行開始 - " .. action)
+	print("Vibe Blocks MCP Plugin: リクエストID - " .. (commandData.request_id or "なし"))
 
 	if action == "get_property_studio" then
 		local objPath = commandData.object_path
@@ -1691,68 +1719,246 @@ local function executeCommand(commandData)
 		print("Vibe Blocks MCP Plugin: Message from server -> " .. message)
 
 	elseif action == "set_environment" then
-		handleSetEnvironment(commandData.data) -- Pass the 'data' part of the command
+		-- request_idをdata内に移動
+		local data = commandData.data or {}
+		data.request_id = commandData.request_id
+		handleSetEnvironment(data) -- Pass the 'data' part of the command
 
 	elseif action == "create_instance" then
-		handleCreateInstance(commandData.data) -- Pass the 'data' part
+		local className = commandData.data.class_name
+		local parentName = commandData.data.parent_name
+		local properties = commandData.data.properties
+		local requestId = commandData.request_id
+		
+		if not className or not parentName then
+			print("Vibe Blocks MCP Plugin: エラー - create_instanceに必須パラメータがありません")
+			print("  class_name: " .. tostring(className))
+			print("  parent_name: " .. tostring(parentName))
+			-- エラー結果を送信
+			if requestId then
+				sendResultToServer(requestId, {success = false, error = "Missing required parameters"})
+			end
+			return
+		end
+		
+		-- 詳細デバッグ
+		print("Vibe Blocks MCP Plugin: DEBUG - create_instance実行")
+		print("  class_name: " .. className)
+		print("  parent_name: " .. parentName) 
+		print("  request_id: " .. tostring(requestId))
+		if properties then
+			print("  properties: " .. HttpService:JSONEncode(properties))
+		end
+		
+		local success, result = pcall(function()
+			local parent = findObjectFromPath(parentName)
+			
+			if not parent then
+				print("Vibe Blocks MCP Plugin: エラー - 親オブジェクト検索失敗: " .. parentName)
+				return {success = false, error = "Parent object not found: " .. parentName}
+			end
+			
+			print("Vibe Blocks MCP Plugin: DEBUG - 親オブジェクト検出: " .. parent:GetFullName())
+			local newInstance = Instance.new(className)
+			
+			-- Apply properties if available
+			if properties then
+				print("Vibe Blocks MCP Plugin: DEBUG - プロパティ設定開始")
+				
+				-- 最初にShapeとBrickColorを設定（これらは変換が必要）
+				if properties.Shape then
+					print("  設定: Shape = " .. tostring(properties.Shape))
+					if properties.Shape == "Block" then
+						newInstance.Shape = Enum.PartType.Block
+						print("  適用: Shape = Enum.PartType.Block")
+					elseif properties.Shape == "Ball" then
+						newInstance.Shape = Enum.PartType.Ball
+						print("  適用: Shape = Enum.PartType.Ball")
+					elseif properties.Shape == "Cylinder" then
+						newInstance.Shape = Enum.PartType.Cylinder
+						print("  適用: Shape = Enum.PartType.Cylinder")
+					else
+						pcall(function() newInstance.Shape = properties.Shape end)
+					end
+				end
+				
+				if properties.BrickColor then
+					print("  設定: BrickColor = " .. tostring(properties.BrickColor))
+					pcall(function() 
+						newInstance.BrickColor = BrickColor.new(properties.BrickColor)
+						print("  適用: BrickColor = " .. newInstance.BrickColor.Name)
+					end)
+				end
+				
+				-- 他のすべてのプロパティを設定
+				for propName, propValue in pairs(properties) do
+					if propName ~= "Shape" and propName ~= "BrickColor" then
+						print("  設定: " .. propName .. " = " .. tostring(propValue))
+						
+						-- Vector3の特別処理
+						if propName == "Position" or propName == "Size" then
+							if type(propValue) == "table" and #propValue == 3 then
+								-- 配列形式 [x,y,z]
+								pcall(function()
+									newInstance[propName] = Vector3.new(propValue[1], propValue[2], propValue[3])
+									print("  適用: " .. propName .. " = Vector3(" .. 
+									      tostring(propValue[1]) .. ", " .. 
+									      tostring(propValue[2]) .. ", " .. 
+									      tostring(propValue[3]) .. ")")
+								end)
+							else
+								-- 通常の代入を試行
+								pcall(function() newInstance[propName] = propValue end)
+							end
+						else
+							-- その他のプロパティは通常代入
+							pcall(function() newInstance[propName] = propValue end)
+						end
+					end
+				end
+			end
+			
+			newInstance.Parent = parent
+			local path = getFullPath(newInstance)
+			print("Vibe Blocks MCP Plugin: DEBUG - インスタンス作成完了: " .. path)
+			return {success = true, path = path}
+		end)
+		
+		-- 実行結果をすぐに送信
+		if success then
+			print("Vibe Blocks MCP Plugin: 成功 - インスタンス作成: " .. className)
+			-- 成功結果の送信
+			if requestId then
+				print("Vibe Blocks MCP Plugin: DEBUG - 結果送信実行 (成功)")
+				sendResultToServer(requestId, result)
+			else
+				print("Vibe Blocks MCP Plugin: 警告 - リクエストIDなし、結果送信スキップ")
+			end
+		else
+			print("Vibe Blocks MCP Plugin: エラー - インスタンス作成失敗: " .. tostring(result))
+			-- エラー結果の送信
+			if requestId then
+				print("Vibe Blocks MCP Plugin: DEBUG - 結果送信実行 (エラー)")
+				sendResultToServer(requestId, {success = false, error = tostring(result)})
+			else
+				print("Vibe Blocks MCP Plugin: 警告 - リクエストIDなし、結果送信スキップ")
+			end
+		end
 
 	elseif action == "delete_instance" then
-		handleDeleteInstance(commandData.data)
+		-- request_idをdata内に移動
+		local data = commandData.data or {}
+		data.request_id = commandData.request_id
+		handleDeleteInstance(data)
 
 	elseif action == "set_property" then
-		handleSetProperty(commandData.data)
+		-- request_idをdata内に移動
+		local data = commandData.data or {}
+		data.request_id = commandData.request_id
+		handleSetProperty(data)
 
 	elseif action == "move_instance" then
-		handleMoveInstance(commandData.data)
+		-- request_idをdata内に移動
+		local data = commandData.data or {}
+		data.request_id = commandData.request_id
+		handleMoveInstance(data)
 
 	elseif action == "clone_instance" then
-		handleCloneInstance(commandData.data)
+		-- request_idをdata内に移動
+		local data = commandData.data or {}
+		data.request_id = commandData.request_id
+		handleCloneInstance(data)
 
 	elseif action == "create_script" then
-		handleCreateScript(commandData.data)
+		-- request_idをdata内に移動
+		local data = commandData.data or {}
+		data.request_id = commandData.request_id
+		handleCreateScript(data)
 
 	elseif action == "spawn_npc" then
-		handleSpawnNpc(commandData.data)
+		-- request_idをdata内に移動
+		local data = commandData.data or {}
+		data.request_id = commandData.request_id
+		handleSpawnNpc(data)
 
 	elseif action == "scale_model" then
-		handleScaleModel(commandData.data)
+		-- request_idをdata内に移動
+		local data = commandData.data or {}
+		data.request_id = commandData.request_id
+		handleScaleModel(data)
 
 	elseif action == "play_animation" then
-		handlePlayAnimation(commandData.data)
+		-- request_idをdata内に移動
+		local data = commandData.data or {}
+		data.request_id = commandData.request_id
+		handlePlayAnimation(data)
 
 	elseif action == "send_chat" then
-		handleSendChat(commandData.data)
+		-- request_idをdata内に移動
+		local data = commandData.data or {}
+		data.request_id = commandData.request_id
+		handleSendChat(data)
 
 	elseif action == "teleport_player" then
-		handleTeleportPlayer(commandData.data)
+		-- request_idをdata内に移動
+		local data = commandData.data or {}
+		data.request_id = commandData.request_id
+		handleTeleportPlayer(data)
 
 	elseif action == "set_player_position" then
-		handleSetPlayerPosition(commandData.data)
+		-- request_idをdata内に移動
+		local data = commandData.data or {}
+		data.request_id = commandData.request_id
+		handleSetPlayerPosition(data)
 
 	elseif action == "list_children" then
-		handleListChildren(commandData.data)
+		-- request_idをdata内に移動
+		local data = commandData.data or {}
+		data.request_id = commandData.request_id
+		handleListChildren(data)
 
 	elseif action == "get_property" then
-		handleGetProperty(commandData.data)
+		-- request_idをdata内に移動
+		local data = commandData.data or {}
+		data.request_id = commandData.request_id
+		handleGetProperty(data)
 
 	elseif action == "find_instances" then
-		handleFindInstances(commandData.data)
+		-- request_idをdata内に移動
+		local data = commandData.data or {}
+		data.request_id = commandData.request_id
+		handleFindInstances(data)
 
 	elseif action == "edit_script" then
-		handleEditScript(commandData.data)
+		-- request_idをdata内に移動
+		local data = commandData.data or {}
+		data.request_id = commandData.request_id
+		handleEditScript(data)
 
 	elseif action == "delete_script" then
-		handleDeleteScript(commandData.data)
+		-- request_idをdata内に移動
+		local data = commandData.data or {}
+		data.request_id = commandData.request_id
+		handleDeleteScript(data)
 
 	elseif action == "set_primary_part" then
-		handleSetPrimaryPart(commandData.data)
+		-- request_idをdata内に移動
+		local data = commandData.data or {}
+		data.request_id = commandData.request_id
+		handleSetPrimaryPart(data)
 
 	elseif action == "execute_script_in_studio" then
-		handleExecuteScriptInStudio(commandData.data)
+		-- request_idをdata内に移動
+		local data = commandData.data or {}
+		data.request_id = commandData.request_id
+		handleExecuteScriptInStudio(data)
 
 	-- <<< ADD: New action routing >>>
 	elseif action == "modify_children" then
-		handleModifyChildren(commandData.data)
+		-- request_idをdata内に移動
+		local data = commandData.data or {}
+		data.request_id = commandData.request_id
+		handleModifyChildren(data)
 
 	else
 		print("Vibe Blocks MCP Plugin: Unknown command action received: " .. tostring(action))
@@ -1783,7 +1989,7 @@ local COMMAND_HANDLERS = {
 	modify_children = handleModifyChildren, -- <<< REGISTER: New handler >>>
 }
 
--- Modify the main polling loop to check isEnabled and log connection changes
+
 local function pollServer()
     if not isEnabled then
         return
@@ -1812,11 +2018,54 @@ local function pollServer()
         end
     end
     
-    -- Process response...
-    -- (rest of the polling logic remains the same)
+    -- レスポンスがある場合は処理を実行
+    if success and response and response ~= "" then
+        -- レスポンスの内容確認
+        if response == "{}" or response == "[]" then
+            -- 空のオブジェクトや配列は無視
+            print("Vibe Blocks MCP Plugin: DEBUG - 空のレスポンス受信、処理スキップ")
+            return
+        end
+        
+        print("Vibe Blocks MCP Plugin: DEBUG - コマンド受信: " .. string.sub(response, 1, 100) .. (string.len(response) > 100 and "..." or ""))
+        
+        local decodeSuccess, decodedCommand = pcall(function()
+            return HttpService:JSONDecode(response)
+        end)
+        
+        if not decodeSuccess then
+            print("Vibe Blocks MCP Plugin: エラー - JSONデコード失敗: " .. tostring(decodedCommand))
+            return
+        end
+        
+        -- 配列の場合は最初の要素を使用（サーバーが配列として送ってくる場合）
+        if decodedCommand and type(decodedCommand) == "table" then
+            if #decodedCommand > 0 then
+                -- 配列として送られてきた場合、最初の要素を使用
+                print("Vibe Blocks MCP Plugin: DEBUG - 配列形式のレスポンス検出、最初の要素を使用")
+                decodedCommand = decodedCommand[1]
+            elseif next(decodedCommand) == nil then
+                -- 空のテーブル/オブジェクトの場合
+                print("Vibe Blocks MCP Plugin: DEBUG - 空のオブジェクト受信、処理スキップ")
+                return
+            end
+        end
+        
+        if decodedCommand and decodedCommand.action then
+            print("Vibe Blocks MCP Plugin: DEBUG - コマンドタイプ: " .. decodedCommand.action)
+            if decodedCommand.request_id then
+                print("Vibe Blocks MCP Plugin: DEBUG - リクエストID: " .. decodedCommand.request_id)
+            end
+            
+            -- コマンド実行
+            executeCommand(decodedCommand)
+        else
+            print("Vibe Blocks MCP Plugin: エラー - コマンドにactionがありません")
+            print("Vibe Blocks MCP Plugin: DEBUG - 受信データ: " .. response)
+        end
+    end
 end
 
--- Modify the log sending function to check isEnabled
 local function sendLogsToServer()
     -- プラグインが無効化されている場合は何もしない
     if not isEnabled then
@@ -1835,7 +2084,6 @@ local function sendLogsToServer()
     end
 
     isSendingLogs = true
-    lastLogSendTime = currentTime -- Update time *before* sending
 
     -- Take a batch (up to MAX_LOG_BATCH_SIZE)
     local batch = {}
@@ -1874,6 +2122,7 @@ local function sendLogsToServer()
     end
 
     isSendingLogs = false
+    lastLogSendTime = currentTime
 
     -- If there are still logs left, immediately try sending another batch
     -- This handles cases where logs accumulate faster than the send interval allows clearing
@@ -1899,6 +2148,7 @@ local function onMessageOut(message, messageType)
         log_type = tostring(messageType), -- Convert Enum::MessageType to string
         timestamp = os.clock() -- Use os.clock() for high-resolution timestamp
     }
+
     table.insert(logsToSend, logEntry)
 
     -- Trigger send mechanism (non-blocking)
@@ -1914,11 +2164,11 @@ if RunService:IsStudio() then
     -- Connect to Log Service
     LogService.MessageOut:Connect(onMessageOut)
     -- Start polling loop
-    RunService.Heartbeat:Connect(function() pollServer() end)
+    RunService.Heartbeat:Connect(pollServer)
 else
-    print("Vibe Blocks MCP Companion Plugin: Not running in Studio environment.")
+    -- Not in Studio, nothing to do
 end
 
 -- --- NEW: List Children Handler --- --
 -- <<< Function definition moved above COMMAND_HANDLERS >>>
--- --- END: List Children Handler --- -- 
+-- --- END: List Children Handler --- 

@@ -9,6 +9,21 @@
 - Rojo
 - Git
 
+### 環境変数ファイルの作成
+プロジェクトのルートディレクトリに `.env` ファイルを作成し、以下の内容を記述します:
+```
+# Roblox API Configuration
+ROBLOX_API_KEY=dummy_api_key
+ROBLOX_UNIVERSE_ID=0
+ROBLOX_PLACE_ID=0
+
+# MCP Server Configuration
+MCP_SERVER_PORT=8001
+DEBUG=False
+```
+
+この設定はMCPサーバーの起動に必須です。設定値はダミーでも問題ありませんが、実際のRobloxプロジェクトで利用する場合は適切な値に変更してください。
+
 ### 仮想環境のセットアップ
 ```bash
 # リポジトリのクローン
@@ -87,7 +102,9 @@ rojo build default.project.json --output VibeBlocksMCP_Companion.rbxm
 ### トラブルシューティング
 - ポート8000が使用中の場合は、上記の手順で8001を使用
 - プラグインが接続できない場合は、`SERVER_URL` の設定を確認
-- 依存関係のエラーが出る場合は、`pip install -e .` を実行して再インストール 
+- 依存関係のエラーが出る場合は、`pip install -e .` を実行して再インストール
+- サーバー起動時に「No tools available」エラーが表示される場合は、`.env` ファイルが正しく作成されているか確認
+- サーバーログに「Failed to load configuration」エラーが表示される場合も、`.env` ファイルの内容を確認
 
 ## 6. 作業終了時の手順
 
