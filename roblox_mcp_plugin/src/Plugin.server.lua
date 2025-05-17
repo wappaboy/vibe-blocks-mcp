@@ -15,286 +15,22 @@ local RunService = game:GetService("RunService")
 local LogService = game:GetService("LogService")
 local Plugin = script:FindFirstAncestorOfClass("Plugin")
 
--- Constants
 local SERVER_URL = "http://localhost:8001/plugin_command"
 local POLLING_INTERVAL = 2 -- Seconds
+
+-- --- NEW: Result Reporting Configuration --- --
 local SERVER_RESULT_ENDPOINT = "http://localhost:8001/plugin_report_result"
+-- --- END: Result Reporting Configuration --- --
+
+-- --- NEW: Logging Configuration --- --
 local SERVER_LOG_ENDPOINT = "http://localhost:8001/receive_studio_logs"
 local SEND_INTERVAL = 1.5
 local MAX_LOG_BATCH_SIZE = 50
 
--- State variables
-local lastPollTime = 0
-local isEnabled = false -- Track if plugin is enabled
-local toolbarButton = nil -- Store reference to toolbar button
-local isConnected = false -- Track connection state
-local wasConnected = false -- Track previous connection state
-local showDebugLogs = false -- Track if debug logs should be shown
-local pluginGui = nil -- Store reference to DockWidget
-local connectButton = nil -- Store reference to Connect button
-local debugToggle = nil -- Store reference to Debug toggle
-local statusLabel = nil -- Store reference to status label
-local styles = nil -- Store reference to UI styles
-
--- Log buffer
 local logsToSend = {}
 local isSendingLogs = false
 local lastLogSendTime = 0
-
--- Debug log function that respects the showDebugLogs flag
-local function debugLog(message)
-    if showDebugLogs then
-        print(message)
-    end
-end
-
--- Helper function to create UI styles
-local function createStyles()
-    local styles = {}
-    
-    -- Button styles
-    styles.buttonHeight = 30
-    styles.buttonWidth = 120
-    styles.buttonColor = Color3.fromRGB(53, 53, 53)
-    styles.buttonBorderColor = Color3.fromRGB(80, 80, 80)
-    styles.buttonTextColor = Color3.fromRGB(255, 255, 255)
-    styles.buttonFontSize = Enum.FontSize.Size14
-    
-    -- Button states
-    styles.connectedColor = Color3.fromRGB(46, 124, 46) -- 緑色
-    styles.disconnectedColor = Color3.fromRGB(124, 46, 46) -- 赤色
-    
-    -- Toggle styles
-    styles.togglePadding = 5
-    styles.toggleHeight = 30
-    
-    -- Widget styles
-    styles.widgetSize = Vector2.new(300, 200)
-    styles.widgetTitle = "Vibe Blocks MCP"
-    styles.backgroundColor = Color3.fromRGB(40, 40, 40)
-    styles.textColor = Color3.fromRGB(240, 240, 240)
-    
-    -- General padding
-    styles.padding = 10
-    
-    return styles
-end
-
--- Create UI elements
-local function createUI()
-    styles = createStyles()
-    
-    -- Create DockWidgetPluginGuiInfo
-    local widgetInfo = DockWidgetPluginGuiInfo.new(
-        Enum.InitialDockState.Float,  -- Widget will be freely floating
-        true,   -- Widget will be initially enabled
-        false,  -- Override previous enabled state
-        styles.widgetSize.X, styles.widgetSize.Y,  -- Size
-        styles.widgetSize.X, styles.widgetSize.Y   -- Min Size
-    )
-    
-    -- Create DockWidget
-    pluginGui = Plugin:CreateDockWidgetPluginGui("VibeBlocksMCPWidget", widgetInfo)
-    pluginGui.Title = styles.widgetTitle
-    pluginGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
-    
-    -- Create UI layout
-    local mainFrame = Instance.new("Frame")
-    mainFrame.Size = UDim2.new(1, 0, 1, 0)
-    mainFrame.BackgroundColor3 = styles.backgroundColor
-    mainFrame.BorderSizePixel = 0
-    mainFrame.Parent = pluginGui
-    
-    -- Create padding for main frame
-    local mainPadding = Instance.new("UIPadding")
-    mainPadding.PaddingLeft = UDim.new(0, styles.padding)
-    mainPadding.PaddingRight = UDim.new(0, styles.padding)
-    mainPadding.PaddingTop = UDim.new(0, styles.padding)
-    mainPadding.PaddingBottom = UDim.new(0, styles.padding)
-    mainPadding.Parent = mainFrame
-    
-    -- Create layout for main frame
-    local mainLayout = Instance.new("UIListLayout")
-    mainLayout.Padding = UDim.new(0, styles.padding)
-    mainLayout.SortOrder = Enum.SortOrder.LayoutOrder
-    mainLayout.Parent = mainFrame
-    
-    -- Title label
-    local titleLabel = Instance.new("TextLabel")
-    titleLabel.Size = UDim2.new(1, 0, 0, 30)
-    titleLabel.Text = "Vibe Blocks MCP Controller"
-    titleLabel.TextColor3 = styles.textColor
-    titleLabel.BackgroundTransparency = 1
-    titleLabel.TextSize = 18
-    titleLabel.Font = Enum.Font.SourceSansBold
-    titleLabel.LayoutOrder = 1
-    titleLabel.Parent = mainFrame
-    
-    -- Status label
-    statusLabel = Instance.new("TextLabel")
-    statusLabel.Size = UDim2.new(1, 0, 0, 20)
-    statusLabel.Text = "Status: Disconnected"
-    statusLabel.TextColor3 = styles.textColor
-    statusLabel.BackgroundTransparency = 1
-    statusLabel.TextSize = 14
-    statusLabel.Font = Enum.Font.SourceSans
-    statusLabel.LayoutOrder = 2
-    statusLabel.Parent = mainFrame
-    
-    -- Connection button
-    connectButton = Instance.new("TextButton")
-    connectButton.Size = UDim2.new(0, styles.buttonWidth, 0, styles.buttonHeight)
-    connectButton.Position = UDim2.new(0, 0, 0, 0)
-    connectButton.Text = "Connect"
-    connectButton.TextColor3 = styles.buttonTextColor
-    connectButton.BackgroundColor3 = styles.disconnectedColor
-    connectButton.BorderColor3 = styles.buttonBorderColor
-    connectButton.TextSize = 14
-    connectButton.Font = Enum.Font.SourceSansBold
-    connectButton.LayoutOrder = 3
-    connectButton.Parent = mainFrame
-    
-    -- Debug toggle container
-    local toggleContainer = Instance.new("Frame")
-    toggleContainer.Size = UDim2.new(1, 0, 0, styles.toggleHeight)
-    toggleContainer.BackgroundTransparency = 1
-    toggleContainer.LayoutOrder = 4
-    toggleContainer.Parent = mainFrame
-    
-    -- Debug toggle label
-    local toggleLabel = Instance.new("TextLabel")
-    toggleLabel.Size = UDim2.new(0.7, 0, 1, 0)
-    toggleLabel.Position = UDim2.new(0, 0, 0, 0)
-    toggleLabel.Text = "Show Debug Logs"
-    toggleLabel.TextColor3 = styles.textColor
-    toggleLabel.TextXAlignment = Enum.TextXAlignment.Left
-    toggleLabel.BackgroundTransparency = 1
-    toggleLabel.TextSize = 14
-    toggleLabel.Font = Enum.Font.SourceSans
-    toggleLabel.Parent = toggleContainer
-    
-    -- Debug toggle button
-    debugToggle = Instance.new("TextButton")
-    debugToggle.Size = UDim2.new(0, 50, 0, 20)
-    debugToggle.Position = UDim2.new(0.8, 0, 0.5, -10)
-    debugToggle.Text = ""
-    debugToggle.BackgroundColor3 = Color3.fromRGB(80, 80, 80)
-    debugToggle.BorderColor3 = styles.buttonBorderColor
-    debugToggle.Parent = toggleContainer
-    
-    -- Debug toggle indicator
-    local toggleIndicator = Instance.new("Frame")
-    toggleIndicator.Size = UDim2.new(0, 16, 0, 16)
-    toggleIndicator.Position = UDim2.new(0, 2, 0.5, -8)
-    toggleIndicator.BackgroundColor3 = Color3.fromRGB(200, 200, 200)
-    toggleIndicator.BorderSizePixel = 0
-    toggleIndicator.Name = "Indicator"
-    toggleIndicator.Parent = debugToggle
-    
-    -- Server URL info
-    local urlLabel = Instance.new("TextLabel")
-    urlLabel.Size = UDim2.new(1, 0, 0, 20)
-    urlLabel.Text = "Server: " .. SERVER_URL
-    urlLabel.TextColor3 = styles.textColor
-    urlLabel.BackgroundTransparency = 1
-    urlLabel.TextSize = 12
-    urlLabel.Font = Enum.Font.SourceSans
-    urlLabel.LayoutOrder = 5
-    urlLabel.Parent = mainFrame
-    
-    -- Update status function
-    local function updateStatus()
-        if not connectButton or not statusLabel then return end
-        
-        if isConnected then
-            statusLabel.Text = "Status: Connected"
-            statusLabel.TextColor3 = Color3.fromRGB(85, 255, 85) -- Green
-            connectButton.Text = "Disconnect"
-            connectButton.BackgroundColor3 = styles.connectedColor
-        else
-            statusLabel.Text = "Status: Disconnected"
-            statusLabel.TextColor3 = Color3.fromRGB(255, 85, 85) -- Red
-            connectButton.Text = "Connect"
-            connectButton.BackgroundColor3 = styles.disconnectedColor
-        end
-    end
-    
-    -- Update debug toggle function
-    local function updateDebugToggle()
-        if showDebugLogs then
-            toggleIndicator.Position = UDim2.new(0, 32, 0.5, -8)
-            debugToggle.BackgroundColor3 = Color3.fromRGB(46, 124, 46) -- Green
-        else
-            toggleIndicator.Position = UDim2.new(0, 2, 0.5, -8)
-            debugToggle.BackgroundColor3 = Color3.fromRGB(80, 80, 80) -- Gray
-        end
-    end
-    
-    -- Connect toggle debug logs button
-    debugToggle.MouseButton1Click:Connect(function()
-        showDebugLogs = not showDebugLogs
-        updateDebugToggle()
-        
-        -- Log change in state
-        if showDebugLogs then
-            print("Vibe Blocks MCP Plugin: Debug logs enabled")
-        else
-            print("Vibe Blocks MCP Plugin: Debug logs disabled")
-        end
-    end)
-    
-    -- Connect button
-    connectButton.MouseButton1Click:Connect(function()
-        print("Vibe Blocks MCP Plugin: Connectボタンがクリックされました")
-        
-        isEnabled = not isEnabled
-        
-        if isEnabled then
-            -- サーバー接続処理を直接実装
-            print("Vibe Blocks MCP Plugin: 有効化")
-            print("Vibe Blocks MCP Plugin: サーバー接続テスト開始...")
-            
-            -- サーバー接続テスト
-            local success, response = pcall(function()
-                return HttpService:GetAsync(SERVER_URL)
-            end)
-            
-            local previousState = isConnected
-            isConnected = success
-            
-            -- 接続状態の表示
-            if isConnected ~= previousState then
-                if isConnected then
-                    print("Vibe Blocks MCP Plugin: サーバーに接続しました")
-                else
-                    print("Vibe Blocks MCP Plugin: サーバー接続失敗 - " .. tostring(response))
-                end
-            end
-        else
-            isConnected = false
-            print("Vibe Blocks MCP Plugin: 無効化")
-        end
-        
-        -- UI状態を更新
-        if isConnected then
-            statusLabel.Text = "Status: Connected"
-            statusLabel.TextColor3 = Color3.fromRGB(85, 255, 85) -- Green
-            connectButton.Text = "Disconnect"
-            connectButton.BackgroundColor3 = styles.connectedColor
-        else
-            statusLabel.Text = "Status: Disconnected"
-            statusLabel.TextColor3 = Color3.fromRGB(255, 85, 85) -- Red
-            connectButton.Text = "Connect"
-            connectButton.BackgroundColor3 = styles.disconnectedColor
-        end
-    end)
-    
-    -- Set initial states
-    updateStatus()
-    updateDebugToggle()
-    
-    return pluginGui
-end
+-- --- END: Logging Configuration --- --
 
 -- 変数定義
 local lastPollTime = 0
@@ -307,7 +43,8 @@ local wasConnected = false -- Track previous connection state
 
 -- 接続状態をテストする関数
 local function testConnection()
-    print("Vibe Blocks MCP Plugin: testConnection関数が呼び出されました")
+    if not toolbarButton then return end -- ボタンが初期化されていない場合は何もしない
+    
     debugLog("接続テスト実行開始")
     
     local success, response = pcall(function()
@@ -351,11 +88,6 @@ local function testConnection()
             print("Vibe Blocks MCP Plugin: Failed to connect to server - " .. tostring(response))
         end
     end
-    
-    -- UIの更新
-    if _G.updateMCPPluginStatus then
-        _G.updateMCPPluginStatus()
-    end
 end
 
 -- Create toolbar button
@@ -392,14 +124,8 @@ local function createToolbarButton()
     
     -- Connect click event
     button.Click:Connect(function()
-        -- ウィンドウを表示または非表示
-        if not pluginGui then
-            -- まだUI作成されていない場合、作成
-            pluginGui = createUI()
-        else
-            -- すでに作成されている場合は表示/非表示を切り替え
-            pluginGui.Enabled = not pluginGui.Enabled
-        end
+        isEnabled = not isEnabled
+        button:SetActive(isEnabled)
         
         if isEnabled then
             print("Vibe Blocks MCP Plugin: Start connecting...")
@@ -2290,16 +2016,13 @@ local function pollServer()
     wasConnected = isConnected
     isConnected = success
     
-    -- 接続状態が変化した時のみログを表示し、UIを更新
+    -- 接続状態が変化した時のみログを表示
     if isConnected ~= wasConnected then
         if isConnected then
             print("Vibe Blocks MCP Plugin: Connected to server")
         else
             print("Vibe Blocks MCP Plugin: Lost connection to server - " .. tostring(response))
         end
-        
-        -- UIの更新
-        updateStatus()
     end
     
     -- レスポンスがある場合は処理を実行
@@ -2318,7 +2041,7 @@ local function pollServer()
         end)
         
         if not decodeSuccess then
-            debugLog("Vibe Blocks MCP Plugin: エラー - JSONデコード失敗: " .. tostring(decodedCommand))
+            print("Vibe Blocks MCP Plugin: エラー - JSONデコード失敗: " .. tostring(decodedCommand))
             return
         end
         
