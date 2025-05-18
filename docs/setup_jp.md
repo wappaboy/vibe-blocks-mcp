@@ -31,12 +31,23 @@ git clone https://github.com/majidmanzarpour/vibe-blocks-mcp.git
 cd vibe-blocks-mcp
 
 # 仮想環境の作成と有効化
+# Windows:
 python -m venv .venv
-source .venv/Scripts/activate  # Windows (bash)
-# source .venv/bin/activate    # macOS/Linux
+source .venv/Scripts/activate
+
+# macOS/Linux:
+python3.10 -m venv .venv
+source .venv/bin/activate
+
+# pipのアップグレード（推奨）
+python -m pip install --upgrade pip
 
 # 依存関係のインストール
-pip install -e .
+# 注: setup.pyがない場合は下記の方法を使用
+pip install -r requirements.txt
+
+# 依存関係のインストールに問題がある場合は、個別にインストール
+# pip install mcp>=1.9.0 fastapi uvicorn[standard] python-dotenv aiohttp pydantic
 ```
 
 ## 2. MCP サーバーの起動
@@ -69,10 +80,27 @@ rojo build default.project.json --output VibeBlocksMCP_Companion.rbxm
 
 ## 4. Cursor の設定
 
+### UIでの設定方法
 1. Cursor を起動
 2. `File > Settings > MCP` (または `Code > Settings > MCP` on Mac) を開く
 3. "Add New Global MCP Server" をクリック
 4. SSE URL に `http://localhost:8001/sse` を入力
+
+### mcp.jsonファイルを直接編集する方法
+1. 以下のファイルを開く：
+   - Windows: `%APPDATA%\Cursor\mcp.json`
+   - macOS: `~/Library/Application Support/Cursor/mcp.json`
+2. ファイルが存在しない場合は作成する
+3. 以下の内容を追加・編集する：
+```json
+{
+  "mcpServers": {
+    "vibe-blocks-mcp": {
+      "url": "http://localhost:8001/sse"
+    }
+  }
+}
+```
 
 ## 5. 動作確認
 
@@ -102,9 +130,14 @@ rojo build default.project.json --output VibeBlocksMCP_Companion.rbxm
 ### トラブルシューティング
 - ポート8000が使用中の場合は、上記の手順で8001を使用
 - プラグインが接続できない場合は、`SERVER_URL` の設定を確認
-- 依存関係のエラーが出る場合は、`pip install -e .` を実行して再インストール
+- 依存関係のエラーが出る場合は、以下のコマンドで必要なパッケージを個別にインストールしてみてください：
+  ```
+  pip install mcp>=1.9.0 fastapi>=0.100.0 uvicorn[standard]>=0.22.0 python-dotenv>=1.0.0 aiohttp>=3.8.0 pydantic>=2.0.0
+  ```
+- `ModuleNotFoundError: No module named 'mcp'` または `No module named 'fastapi'` などのエラーが出る場合、必要なパッケージがインストールされていないか、パスが通っていない可能性があります
 - サーバー起動時に「No tools available」エラーが表示される場合は、`.env` ファイルが正しく作成されているか確認
 - サーバーログに「Failed to load configuration」エラーが表示される場合も、`.env` ファイルの内容を確認
+- Python 3.10以上が必要です。それより古いバージョン（3.9など）ではMCPパッケージが動作しません
 
 ## 6. 作業終了時の手順
 
