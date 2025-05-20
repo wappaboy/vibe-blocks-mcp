@@ -141,8 +141,9 @@ local function createToolbarButton()
 end
 
 -- Initialize toolbar button
-toolbarButton = createToolbarButton()
-
+if RunService:IsStudio() and not RunService:IsRunning() then
+    toolbarButton = createToolbarButton()
+end
 
 -- --- Helper: Send Result Back to Server --- --
 local function sendResultToServer(requestId, resultData)

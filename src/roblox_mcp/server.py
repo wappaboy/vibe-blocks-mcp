@@ -803,50 +803,30 @@ async def create_instance(ctx: Context,
                       class_name: str = Field(..., description="The ClassName of the instance to create (e.g., 'Part', 'Model', 'Script')."),
                       properties: Dict[str, Any] = None,
                       parent_name: str = Field("Workspace", description="Name or path of the parent object to create the instance under (defaults to Workspace).")) -> str:
-    """Creates a new instance via Studio Plugin command queue."""
+    """Creates a new instance in the Roblox Studio session."""
     logger.info(f"Creating instance: Class='{class_name}', Parent='{parent_name}', Props={properties}")
     
-    # Basic validation
-    if not re.match(r"^\w+$", class_name):
-        return f"Error: Invalid ClassName format: {class_name}"
-    # TODO: Consider adding validation for parent_name and property keys/values
-
+    # Create command for the plugin
     command = {
         "action": "create_instance",
         "data": {
             "class_name": class_name,
             "parent_name": parent_name,
-            "properties": properties if properties else {}
+            "properties": properties or {}  # Ensure properties is never None
         }
     }
-
-    try:
-        # Queue the command AND WAIT for the result
-        result = await queue_command_and_wait(command)
-        
-        # Process the result from the plugin
-        if "error" in result:
-            error_msg = result["error"]
-            # Truncate long errors if necessary
-            if isinstance(error_msg, str) and len(error_msg) > 250:
-                error_msg = error_msg[:250] + "..."
-            logger.error(f"Plugin reported error for create_instance: {error_msg}")
-            return f"Error creating instance: {error_msg}"
-        elif "success" in result and result["success"]:
-            instance_name = result.get('name', properties.get('Name', class_name))
-            instance_path = result.get('path', 'unknown path')
-            logger.info(f"Plugin successfully created instance '{instance_name}' at {instance_path}")
-            return f"Successfully created {class_name} '{instance_name}' at '{instance_path}'."
-        else:
-            logger.warning(f"Received unexpected result format from plugin for create_instance: {result}")
-            return f"Error: Unexpected result format from plugin while creating instance."
-
-    except TimeoutError:
-        logger.error(f"Timeout waiting for create_instance result for {class_name}")
-        return f"Error: Timeout waiting for Studio plugin to create instance '{class_name}'."
-    except Exception as e:
-        logger.exception("Unexpected error in create_instance tool.")
-        return f"Unexpected server error: {e}"
+    
+    # Queue the command and wait for result
+    result = await queue_command_and_wait(command)
+    
+    # Process the result
+    if "error" in result:
+        return f"Error creating instance: {result['error']}"
+    elif "success" in result and result["success"]:
+        instance_name = result.get('name', (properties or {}).get('Name', class_name))  # Handle None case for properties
+        return f"Successfully created {class_name} named '{instance_name}' at {result.get('path', 'unknown path')}"
+    else:
+        return f"Unexpected result format from plugin while creating instance: {result}"
 
 @mcp_server.tool()
 async def delete_instance(ctx: Context, object_name: str = Field(..., description="Name or path of the object to delete (e.g., 'MyPart', 'Workspace.Model').")) -> str:
